@@ -67,7 +67,8 @@ The app now supports Twitch OAuth2 login:
    - You will be redirected to Twitch to authorize.
    - Twitch redirects back to the backend `/auth/callback`.
    - The backend exchanges the code for a token and fetches your user profile.
-   - (Work in progress: Bridging the user info back to the frontend state).
+   - **Session Management**: The backend generates a unique session ID for each login and stores it in an `HttpOnly` cookie. This ensures that multiple users can use the app from different browsers without seeing each other's data.
+   - **Logout**: You can now log out, which clears the session on both the client (cookie) and the server (session store).
 
 #### Functional Programming (FP)
 

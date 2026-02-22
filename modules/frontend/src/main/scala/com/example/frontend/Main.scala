@@ -45,6 +45,8 @@ object Main extends TyrianApp[IO, Msg, Model]:
       (model.copy(user = Some(user)), Cmd.None)
     case Msg.GotConfig(config) =>
       (model.copy(twitchClientId = Some(config.twitchClientId)), Cmd.None)
+    case Msg.Logout =>
+      (model.copy(user = None, status = Some("Logging out...")), Http.send(Request.post("/api/logout", Body.Empty), Msg.fromLogoutResponse))
     case Msg.NoOp =>
       (model, Cmd.None)
 
@@ -60,7 +62,9 @@ object Main extends TyrianApp[IO, Msg, Model]:
       model.status.map(s => p(style("font-weight", "bold"))(s)).getOrElse(div()),
       model.user.map(u => div(
         h2(s"Welcome, ${u.display_name}!"),
-        img(src := u.profile_image_url, style("border-radius", "50%"), style("width", "100px"))
+        img(src := u.profile_image_url, style("border-radius", "50%"), style("width", "100px")),
+        br(),
+        button(onClick(Msg.Logout), style("margin-top", "10px"), style("background", "#ff4646"))("Logout")
       )).getOrElse(div())
     )
 
@@ -79,6 +83,7 @@ enum Msg:
   case GotConfig(config: AppConfig)
   case PingError(error: String)
   case LoginWithTwitch
+  case Logout
   case NoOp
 
 object Msg:
@@ -115,4 +120,9 @@ object Msg:
         case Status(code, msg) =>
           Msg.PingError(s"Server returned $code: $msg"),
     error => Msg.PingError(s"Config fetch network error: ${error.toString}")
+  )
+
+  def fromLogoutResponse: Decoder[Msg] = Decoder(
+    _ => Msg.NoOp,
+    _ => Msg.NoOp
   )

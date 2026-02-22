@@ -6,13 +6,14 @@ import org.http4s.ember.server.*
 import org.http4s.implicits.*
 import org.http4s.server.Router
 import org.http4s.dsl.io.*
-import org.http4s.{HttpRoutes, StaticFile}
+import org.http4s.{HttpRoutes, StaticFile, ResponseCookie}
 import org.http4s.circe.CirceEntityEncoder.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.server.middleware.CORS
 import org.http4s.client.Client
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.client.dsl.io.*
+import java.util.UUID
 //import org.http4s.Method.*
 import org.http4s.Uri
 import org.http4s.UrlForm
@@ -31,7 +32,7 @@ object Main extends IOApp.Simple:
   private val clientSecret = sys.env.getOrElse("TWITCH_CLIENT_SECRET", "your_client_secret")
   private val redirectUri = "http://localhost:8080/auth/callback"
 
-  private def authRoutes(client: Client[IO], userSession: Ref[IO, Option[TwitchUser]]) = HttpRoutes.of[IO] {
+  private def authRoutes(client: Client[IO], userSession: Ref[IO, Map[String, TwitchUser]]) = HttpRoutes.of[IO] {
     case GET -> Root / "auth" / "callback" :? CodeQueryParamMatcher(code) =>
       val flow = for {
         _ <- IO.println(s"Received auth code: $code")
@@ -71,8 +72,9 @@ object Main extends IOApp.Simple:
         )
         user = userResponse.data.head
         _ <- IO.println(s"Found user: ${user.display_name}")
-        _ <- userSession.set(Some(user))
-        res <- Found(Location(uri"/"))
+        sessionId = UUID.randomUUID().toString
+        _ <- userSession.update(_ + (sessionId -> user))
+        res <- Found(Location(uri"/")).map(_.addCookie(ResponseCookie("session_id", sessionId, path = Some("/"), httpOnly = true)))
       } yield res
 
       flow.handleErrorWith { err =>
@@ -83,18 +85,29 @@ object Main extends IOApp.Simple:
 
   object CodeQueryParamMatcher extends QueryParamDecoderMatcher[String]("code")
 
-  private def apiRoutes(userSession: Ref[IO, Option[TwitchUser]]) = HttpRoutes.of[IO] {
+  private def apiRoutes(userSession: Ref[IO, Map[String, TwitchUser]]) = HttpRoutes.of[IO] {
     case GET -> Root / "config" =>
       Ok(AppConfig(clientId))
     case GET -> Root / "ping" =>
       IO.println("Received ping request, responding with pong") *> Ok(Ping("pong"))
-    case GET -> Root / "user" =>
-      userSession.get.flatMap {
-        case Some(user) => Ok(user)
-        case None       => NotFound("No user logged in")
+    case req @ GET -> Root / "user" =>
+      val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
+      sessionId match {
+        case Some(id) =>
+          userSession.get.flatMap { sessions =>
+            sessions.get(id) match {
+              case Some(user) => Ok(user)
+              case None       => NotFound("No user logged in")
+            }
+          }
+        case None => NotFound("No session found")
       }
-    case POST -> Root / "logout" =>
-      userSession.set(None) *> Ok("Logged out")
+    case req @ POST -> Root / "logout" =>
+      val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
+      for {
+        _ <- sessionId.fold(IO.unit)(id => userSession.update(_ - id))
+        res <- Ok("Logged out").map(_.removeCookie("session_id"))
+      } yield res
   }
 
   private def helloWorldService = HttpRoutes.of[IO] {
@@ -104,7 +117,7 @@ object Main extends IOApp.Simple:
 
   def run: IO[Unit] =
     for {
-      userSession <- IO.ref[Option[TwitchUser]](None)
+      userSession <- IO.ref[Map[String, TwitchUser]](Map.empty)
       _ <- EmberClientBuilder.default[IO].build.use { client =>
         val host = host"0.0.0.0"
         val port = port"8080"
