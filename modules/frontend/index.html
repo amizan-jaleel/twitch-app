@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitch App</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f0f2f5; }
+        #app { text-align: center; padding: 2rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 0.5rem 1rem; cursor: pointer; background: #9146ff; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #772ce8; }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <!-- This path assumes fastLinkJS output in development -->
+    <script src="target/scala-3.6.3/frontend-fastopt/main.js"></script>
+</body>
+</html>
