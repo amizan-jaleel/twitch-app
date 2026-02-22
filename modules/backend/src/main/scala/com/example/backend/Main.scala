@@ -28,8 +28,14 @@ import com.example.core.{Ping, TwitchTokenResponse, TwitchUser, TwitchUsersRespo
 object Main extends IOApp.Simple:
 
   // These should be configured via environment variables
-  private val clientId = sys.env.getOrElse("TWITCH_CLIENT_ID", "your_client_id")
-  private val clientSecret = sys.env.getOrElse("TWITCH_CLIENT_SECRET", "your_client_secret")
+  private val clientId = sys.env.getOrElse("TWITCH_CLIENT_ID", {
+    System.err.println("ERROR: TWITCH_CLIENT_ID environment variable is not set")
+    sys.exit(1)
+  })
+  private val clientSecret = sys.env.getOrElse("TWITCH_CLIENT_SECRET", {
+    System.err.println("ERROR: TWITCH_CLIENT_SECRET environment variable is not set")
+    sys.exit(1)
+  })
   private val redirectUri = "http://localhost:8080/auth/callback"
 
   private def authRoutes(client: Client[IO], userSession: Ref[IO, Map[String, TwitchUser]]) = HttpRoutes.of[IO] {
