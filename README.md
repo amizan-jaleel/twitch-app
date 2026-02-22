@@ -31,8 +31,8 @@ The project uses a `modules/` directory to separate these three distinct compone
    ```sbt
    frontend / fastLinkJS
    ```
-2. **Open in Browser**: Open `modules/frontend/index.html` in your browser.
-   - Note: In development, the `index.html` is configured to look for the JS file in `target/scala-3.3.7/frontend-fastopt/main.js`.
+2. **Access the App**: Since the backend now serves the frontend, you don't need to open the HTML file directly. Once the backend is running, just go to:
+   `http://localhost:8080`
 
 #### iOS / Android Support
 
@@ -42,6 +42,32 @@ For a "Scala as much as possible" approach to mobile:
 - You can wrap your compiled Scala.js frontend into a native container.
 - This allows you to share almost 100% of your frontend code between Web, iOS, and Android.
 - The `core` logic is also shared between the backend and all mobile/web frontends.
+
+#### Twitch Integration
+
+The app now supports Twitch OAuth2 login:
+
+1. **Register your application**:
+   - Go to the [Twitch Developer Console](https://dev.twitch.tv/console).
+   - Register a new application.
+   - Set the **OAuth Redirect URLs** to `http://localhost:8080/auth/callback`.
+2. **Configure the Backend**:
+   - The backend expects `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` environment variables.
+   - **Security Note**: `TWITCH_CLIENT_SECRET` is a private key and must **NEVER** be checked into GitHub. `TWITCH_CLIENT_ID` is public (it's visible in the browser), but we still manage it via environment variables for consistency.
+   - **In IntelliJ IDEA**:
+       1. Open the "Run" menu and select "Edit Configurations...".
+       2. Select the configuration for the backend `Main` object (usually under "Application" or "sbt Task").
+       3. In the **Environment variables** field, enter:
+          `TWITCH_CLIENT_ID=your_client_id;TWITCH_CLIENT_SECRET=your_secret_here`
+       4. Replace `your_client_id` and `your_secret_here` with the values from the Twitch Developer Console.
+       5. Click **OK** and restart the backend.
+3. **How it works**:
+   - The frontend (Scala.js) fetches the `TWITCH_CLIENT_ID` from the backend via the `/api/config` endpoint on startup. This avoids hardcoding keys in the source code and ensures you only need to configure them in one place (the backend environment).
+   - Click "Login with Twitch" on the frontend.
+   - You will be redirected to Twitch to authorize.
+   - Twitch redirects back to the backend `/auth/callback`.
+   - The backend exchanges the code for a token and fetches your user profile.
+   - (Work in progress: Bridging the user info back to the frontend state).
 
 #### Functional Programming (FP)
 
