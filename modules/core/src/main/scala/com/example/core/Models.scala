@@ -23,6 +23,16 @@ case class TwitchUsersResponse(
     data: List[TwitchUser]
 ) derives Codec.AsObject
 
+case class TwitchCategory(
+    id: String,
+    name: String,
+    box_art_url: String
+) derives Codec.AsObject
+
+case class TwitchSearchCategoriesResponse(
+    data: List[TwitchCategory]
+) derives Codec.AsObject
+
 case class AppConfig(
     twitchClientId: String
 ) derives Codec.AsObject

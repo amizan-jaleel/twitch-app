@@ -6,7 +6,7 @@ import tyrian.Html.*
 import tyrian.*
 import tyrian.http.*
 import scala.scalajs.js.annotation.*
-import com.example.core.{Ping, TwitchUser, AppConfig}
+import com.example.core.{Ping, TwitchUser, AppConfig, TwitchCategory, TwitchSearchCategoriesResponse}
 import io.circe.parser.decode
 
 @JSExportTopLevel("TyrianApp")
@@ -19,7 +19,7 @@ object Main extends TyrianApp[IO, Msg, Model]:
     _.unsafeRunAndForget()
 
   def init(flags: Map[String, String]): (Model, Cmd[IO, Msg]) =
-    (Model("Checking session and fetching config...", None, None, None), 
+    (Model("Checking session and fetching config...", None, None, None, "", Nil, Set.empty), 
      Cmd.Batch(
        Http.send(Request.get("/api/user"), Msg.fromUserResponse),
        Http.send(Request.get("/api/config"), Msg.fromConfigResponse)
@@ -47,6 +47,18 @@ object Main extends TyrianApp[IO, Msg, Model]:
       (model.copy(twitchClientId = Some(config.twitchClientId)), Cmd.None)
     case Msg.Logout =>
       (model.copy(user = None, status = Some("Logging out...")), Http.send(Request.post("/api/logout", Body.Empty), Msg.fromLogoutResponse))
+    case Msg.UpdateSearchQuery(q) =>
+      (model.copy(searchQuery = q), Cmd.None)
+    case Msg.SearchCategories =>
+      if (model.searchQuery.trim.isEmpty) (model, Cmd.None)
+      else (model.copy(status = Some("Searching...")), Http.send(Request.get(s"/api/search/categories?query=${model.searchQuery}"), Msg.fromSearchResponse))
+    case Msg.GotSearchResults(results) =>
+      (model.copy(searchResults = results, status = None), Cmd.None)
+    case Msg.ToggleCategorySelection(id) =>
+      val newSelection = 
+        if (model.selectedCategoryIds.contains(id)) model.selectedCategoryIds - id
+        else model.selectedCategoryIds + id
+      (model.copy(selectedCategoryIds = newSelection), Cmd.None)
     case Msg.NoOp =>
       (model, Cmd.None)
 
@@ -57,14 +69,52 @@ object Main extends TyrianApp[IO, Msg, Model]:
       div(
         button(onClick(Msg.SendPing))("Send Ping to Backend"),
         span(" "),
-        button(onClick(Msg.LoginWithTwitch), style("background", "#9146ff"))("Login with Twitch")
+        if (model.user.isEmpty)
+          button(onClick(Msg.LoginWithTwitch), style("background", "#9146ff"))("Login with Twitch")
+        else
+          span()
       ),
       model.status.map(s => p(style("font-weight", "bold"))(s)).getOrElse(div()),
+      
       model.user.map(u => div(
         h2(s"Welcome, ${u.display_name}!"),
-        img(src := u.profile_image_url, style("border-radius", "50%"), style("width", "100px")),
-        br(),
-        button(onClick(Msg.Logout), style("margin-top", "10px"), style("background", "#ff4646"))("Logout")
+        img(src := u.profile_image_url, style("border-radius", "50%"), style("width", "50px")),
+        span(" "),
+        button(onClick(Msg.Logout), style("background", "#ff4646"))("Logout"),
+        
+        hr(),
+        
+        h3("Search Categories"),
+        div(
+          input(
+            `type` := "text",
+            placeholder := "Search for a category...",
+            value := model.searchQuery,
+            onInput(q => Msg.UpdateSearchQuery(q))
+          ),
+          button(onClick(Msg.SearchCategories))("Search")
+        ),
+        
+        div(style("display", "flex"), style("flex-wrap", "wrap"), style("justify-content", "center"), style("margin-top", "20px"))(
+          model.searchResults.map { cat =>
+            val isSelected = model.selectedCategoryIds.contains(cat.id)
+            val boxArtUrl = cat.box_art_url.replace("{width}", "140").replace("{height}", "185")
+            
+            div(
+              onClick(Msg.ToggleCategorySelection(cat.id)),
+              style("margin", "10px"),
+              style("padding", "10px"),
+              style("border", if (isSelected) "2px solid #9146ff" else "1px solid #ddd"),
+              style("border-radius", "8px"),
+              style("cursor", "pointer"),
+              style("width", "160px"),
+              style("background", if (isSelected) "#f0e6ff" else "white")
+            )(
+              img(src := boxArtUrl, style("width", "140px"), style("height", "185px"), style("border-radius", "4px")),
+              p(style("font-size", "0.9rem"), style("font-weight", "bold"), style("margin", "5px 0"))(cat.name)
+            )
+          }
+        )
       )).getOrElse(div())
     )
 
@@ -74,7 +124,15 @@ object Main extends TyrianApp[IO, Msg, Model]:
   def main(args: Array[String]): Unit =
     launch("app")
 
-case class Model(message: String, status: Option[String], user: Option[TwitchUser], twitchClientId: Option[String])
+case class Model(
+    message: String, 
+    status: Option[String], 
+    user: Option[TwitchUser], 
+    twitchClientId: Option[String],
+    searchQuery: String,
+    searchResults: List[TwitchCategory],
+    selectedCategoryIds: Set[String]
+)
 
 enum Msg:
   case SendPing
@@ -84,6 +142,10 @@ enum Msg:
   case PingError(error: String)
   case LoginWithTwitch
   case Logout
+  case UpdateSearchQuery(query: String)
+  case SearchCategories
+  case GotSearchResults(results: List[TwitchCategory])
+  case ToggleCategorySelection(id: String)
   case NoOp
 
 object Msg:
@@ -120,6 +182,18 @@ object Msg:
         case Status(code, msg) =>
           Msg.PingError(s"Server returned $code: $msg"),
     error => Msg.PingError(s"Config fetch network error: ${error.toString}")
+  )
+
+  def fromSearchResponse: Decoder[Msg] = Decoder(
+    response =>
+      response.status match
+        case Status(code, _) if code >= 200 && code < 300 =>
+          decode[TwitchSearchCategoriesResponse](response.body) match
+            case Right(res) => Msg.GotSearchResults(res.data)
+            case Left(err)  => Msg.PingError(s"Search decoding error: ${err.getMessage}")
+        case Status(code, msg) =>
+          Msg.PingError(s"Search failed with $code: $msg"),
+    error => Msg.PingError(s"Search network error: ${error.toString}")
   )
 
   def fromLogoutResponse: Decoder[Msg] = Decoder(

@@ -2,28 +2,30 @@ package com.example.backend
 
 import cats.effect.*
 import com.comcast.ip4s.*
+import org.http4s.circe.CirceEntityDecoder.*
+import org.http4s.circe.CirceEntityEncoder.*
+import org.http4s.client.Client
+import org.http4s.client.dsl.io.*
+import org.http4s.dsl.io.*
+import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.*
 import org.http4s.implicits.*
 import org.http4s.server.Router
-import org.http4s.dsl.io.*
-import org.http4s.{HttpRoutes, StaticFile, ResponseCookie}
-import org.http4s.circe.CirceEntityEncoder.*
-import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.server.middleware.CORS
-import org.http4s.client.Client
-import org.http4s.ember.client.EmberClientBuilder
-import org.http4s.client.dsl.io.*
+import org.http4s.{HttpRoutes, ResponseCookie, StaticFile}
+
 import java.util.UUID
 //import org.http4s.Method.*
-import org.http4s.Uri
-import org.http4s.UrlForm
+import com.example.core.*
+import org.http4s.{AuthScheme, Credentials, Header, Uri, UrlForm}
 import org.http4s.headers.{Authorization, Location}
-import org.http4s.AuthScheme
-import org.http4s.Credentials
-import org.http4s.Header
-import org.typelevel.ci.*
 import org.http4s.server.staticcontent.*
-import com.example.core.{Ping, TwitchTokenResponse, TwitchUser, TwitchUsersResponse, AppConfig}
+import org.typelevel.ci.*
+
+case class SessionData(
+    user: TwitchUser,
+    accessToken: String
+)
 
 object Main extends IOApp.Simple:
 
@@ -38,7 +40,7 @@ object Main extends IOApp.Simple:
   })
   private val redirectUri = "http://localhost:8080/auth/callback"
 
-  private def authRoutes(client: Client[IO], userSession: Ref[IO, Map[String, TwitchUser]]) = HttpRoutes.of[IO] {
+  private def authRoutes(client: Client[IO], userSession: Ref[IO, Map[String, SessionData]]) = HttpRoutes.of[IO] {
     case GET -> Root / "auth" / "callback" :? CodeQueryParamMatcher(code) =>
       val flow = for {
         _ <- IO.println(s"Received auth code: $code")
@@ -79,7 +81,7 @@ object Main extends IOApp.Simple:
         user = userResponse.data.head
         _ <- IO.println(s"Found user: ${user.display_name}")
         sessionId = UUID.randomUUID().toString
-        _ <- userSession.update(_ + (sessionId -> user))
+        _ <- userSession.update(_ + (sessionId -> SessionData(user, tokenResponse.access_token)))
         res <- Found(Location(uri"/")).map(_.addCookie(ResponseCookie("session_id", sessionId, path = Some("/"), httpOnly = true)))
       } yield res
 
@@ -89,9 +91,10 @@ object Main extends IOApp.Simple:
       }
   }
 
-  object CodeQueryParamMatcher extends QueryParamDecoderMatcher[String]("code")
+  private object CodeQueryParamMatcher extends QueryParamDecoderMatcher[String]("code")
+  private object SearchQueryParamMatcher extends QueryParamDecoderMatcher[String]("query")
 
-  private def apiRoutes(userSession: Ref[IO, Map[String, TwitchUser]]) = HttpRoutes.of[IO] {
+  private def apiRoutes(client: Client[IO], userSession: Ref[IO, Map[String, SessionData]]) = HttpRoutes.of[IO] {
     case GET -> Root / "config" =>
       Ok(AppConfig(clientId))
     case GET -> Root / "ping" =>
@@ -102,11 +105,31 @@ object Main extends IOApp.Simple:
         case Some(id) =>
           userSession.get.flatMap { sessions =>
             sessions.get(id) match {
-              case Some(user) => Ok(user)
+              case Some(data) => Ok(data.user)
               case None       => NotFound("No user logged in")
             }
           }
         case None => NotFound("No session found")
+      }
+    case req @ GET -> Root / "search" / "categories" :? SearchQueryParamMatcher(query) =>
+      val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
+      sessionId match {
+        case Some(id) =>
+          userSession.get.flatMap { sessions =>
+            sessions.get(id) match {
+              case Some(data) =>
+                val uri = uri"https://api.twitch.tv/helix/search/categories".withQueryParam("query", query)
+                client.expect[TwitchSearchCategoriesResponse](
+                  GET(
+                    uri,
+                    Authorization(Credentials.Token(AuthScheme.Bearer, data.accessToken)),
+                    Header.Raw(ci"Client-Id", clientId)
+                  )
+                ).flatMap(Ok(_))
+              case None => Forbidden("Not logged in")
+            }
+          }
+        case None => Forbidden("No session cookie")
       }
     case req @ POST -> Root / "logout" =>
       val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
@@ -123,7 +146,7 @@ object Main extends IOApp.Simple:
 
   def run: IO[Unit] =
     for {
-      userSession <- IO.ref[Map[String, TwitchUser]](Map.empty)
+      userSession <- IO.ref[Map[String, SessionData]](Map.empty)
       _ <- EmberClientBuilder.default[IO].build.use { client =>
         val host = host"0.0.0.0"
         val port = port"8080"
@@ -131,7 +154,7 @@ object Main extends IOApp.Simple:
         val frontendService = fileService[IO](FileService.Config("./modules/frontend"))
         
         val httpApp = Router(
-          "/api" -> apiRoutes(userSession),
+          "/api" -> apiRoutes(client, userSession),
           "/" -> authRoutes(client, userSession),
           "/" -> HttpRoutes.of[IO] {
             case req @ GET -> Root =>
