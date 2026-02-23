@@ -6,7 +6,7 @@ import tyrian.Html.*
 import tyrian.*
 import tyrian.http.*
 import scala.scalajs.js.annotation.*
-import com.example.core.{Ping, TwitchUser, AppConfig, TwitchCategory, TwitchSearchCategoriesResponse, FollowRequest, FollowedCategoriesResponse}
+import com.example.core.{TwitchUser, AppConfig, TwitchCategory, TwitchSearchCategoriesResponse, FollowRequest, FollowedCategoriesResponse}
 import io.circe.parser.decode
 import io.circe.syntax.*
 
@@ -20,7 +20,7 @@ object Main extends TyrianApp[IO, Msg, Model]:
     _.unsafeRunAndForget()
 
   def init(flags: Map[String, String]): (Model, Cmd[IO, Msg]) =
-    (Model("Checking session and fetching config...", None, None, None, "", Nil, Set.empty, Nil), 
+    (Model(None, None, None, "", Nil, Set.empty, Nil), 
      Cmd.Batch(
        Http.send(Request.get("/api/user"), Msg.fromUserResponse),
        Http.send(Request.get("/api/config"), Msg.fromConfigResponse),
@@ -28,12 +28,6 @@ object Main extends TyrianApp[IO, Msg, Model]:
      ))
 
   def update(model: Model): Msg => (Model, Cmd[IO, Msg]) =
-    case Msg.SendPing =>
-      (model.copy(status = Some("Sending ping...")), Http.send(Request.get("/api/ping"), Msg.fromHttpResponse))
-    case Msg.GotPing(ping) =>
-      (model.copy(status = Some(s"Server said: ${ping.message}")), Cmd.None)
-    case Msg.PingError(err) =>
-      (model.copy(status = Some(s"Error: $err")), Cmd.None)
     case Msg.LoginWithTwitch =>
       model.twitchClientId match
         case Some(clientId) =>
@@ -77,16 +71,15 @@ object Main extends TyrianApp[IO, Msg, Model]:
       (model.copy(followedCategories = cats, status = None), Cmd.None)
     case Msg.FollowActionSuccess =>
       (model, Http.send(Request.get("/api/followed"), Msg.fromFollowedResponse))
+    case Msg.ApiError(error) =>
+      (model.copy(status = Some(s"Error: $error")), Cmd.None)
     case Msg.NoOp =>
       (model, Cmd.None)
 
   def view(model: Model): Html[Msg] =
     div(
       h1("Twitch App"),
-      p(model.message),
       div(
-        button(onClick(Msg.SendPing))("Send Ping to Backend"),
-        span(" "),
         if (model.user.isEmpty)
           button(onClick(Msg.LoginWithTwitch), style("background", "#9146ff"))("Login with Twitch")
         else
@@ -174,7 +167,6 @@ object Main extends TyrianApp[IO, Msg, Model]:
     launch("app")
 
 case class Model(
-    message: String, 
     status: Option[String], 
     user: Option[TwitchUser], 
     twitchClientId: Option[String],
@@ -185,11 +177,9 @@ case class Model(
 )
 
 enum Msg:
-  case SendPing
-  case GotPing(ping: Ping)
   case GotUser(user: TwitchUser)
   case GotConfig(config: AppConfig)
-  case PingError(error: String)
+  case ApiError(error: String)
   case LoginWithTwitch
   case Logout
   case UpdateSearchQuery(query: String)
@@ -203,18 +193,6 @@ enum Msg:
   case NoOp
 
 object Msg:
-  def fromHttpResponse: Decoder[Msg] = Decoder(
-    response =>
-      response.status match
-        case Status(code, _) if code >= 200 && code < 300 =>
-          decode[Ping](response.body) match
-            case Right(ping) => Msg.GotPing(ping)
-            case Left(err)   => Msg.PingError(s"JSON Decoding error: ${err.getMessage}")
-        case Status(code, msg) =>
-          Msg.PingError(s"Server returned $code: $msg"),
-    error => Msg.PingError(s"Network error: ${error.toString}")
-  )
-
   def fromUserResponse: Decoder[Msg] = Decoder(
     response =>
       response.status match
@@ -232,10 +210,10 @@ object Msg:
         case Status(code, _) if code >= 200 && code < 300 =>
           decode[AppConfig](response.body) match
             case Right(config) => Msg.GotConfig(config)
-            case Left(err)     => Msg.PingError(s"Config decoding error: ${err.getMessage}")
+            case Left(err)     => Msg.ApiError(s"Config decoding error: ${err.getMessage}")
         case Status(code, msg) =>
-          Msg.PingError(s"Server returned $code: $msg"),
-    error => Msg.PingError(s"Config fetch network error: ${error.toString}")
+          Msg.ApiError(s"Server returned $code: $msg"),
+    error => Msg.ApiError(s"Config fetch network error: ${error.toString}")
   )
 
   def fromSearchResponse: Decoder[Msg] = Decoder(
@@ -244,10 +222,10 @@ object Msg:
         case Status(code, _) if code >= 200 && code < 300 =>
           decode[TwitchSearchCategoriesResponse](response.body) match
             case Right(res) => Msg.GotSearchResults(res.data)
-            case Left(err)  => Msg.PingError(s"Search decoding error: ${err.getMessage}")
+            case Left(err)  => Msg.ApiError(s"Search decoding error: ${err.getMessage}")
         case Status(code, msg) =>
-          Msg.PingError(s"Search failed with $code: $msg"),
-    error => Msg.PingError(s"Search network error: ${error.toString}")
+          Msg.ApiError(s"Search failed with $code: $msg"),
+    error => Msg.ApiError(s"Search network error: ${error.toString}")
   )
 
   def fromLogoutResponse: Decoder[Msg] = Decoder(
@@ -268,5 +246,5 @@ object Msg:
 
   def fromFollowActionResponse: Decoder[Msg] = Decoder(
     _ => Msg.FollowActionSuccess,
-    error => Msg.PingError(s"Action failed: ${error.toString}")
+    error => Msg.ApiError(s"Action failed: ${error.toString}")
   )

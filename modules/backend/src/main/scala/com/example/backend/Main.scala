@@ -117,8 +117,6 @@ object Main extends IOApp.Simple:
   private def apiRoutes(client: Client[IO], userSession: Ref[IO, Map[String, SessionData]], xa: Transactor[IO]) = HttpRoutes.of[IO] {
     case GET -> Root / "config" =>
       Ok(AppConfig(clientId))
-    case GET -> Root / "ping" =>
-      IO.println("Received ping request, responding with pong") *> Ok(Ping("pong"))
     case req @ GET -> Root / "user" =>
       getSession(req, userSession).flatMap {
         case Some(data) => Ok(data.user)
@@ -174,11 +172,6 @@ object Main extends IOApp.Simple:
       } yield res
   }
 
-  private def helloWorldService = HttpRoutes.of[IO] {
-    case GET -> Root / "hello" / name =>
-      Ok(s"Hello, $name.")
-  }
-
   def run: IO[Unit] =
     val dbUrl = "jdbc:h2:./twitch_app_db;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
     val transactorResource = for {
@@ -203,8 +196,7 @@ object Main extends IOApp.Simple:
               case req @ GET -> Root =>
                 StaticFile.fromPath(fs2.io.file.Path("./modules/frontend/index.html"), Some(req)).getOrElseF(NotFound())
             },
-            "/" -> frontendService,
-            "/" -> helloWorldService
+            "/" -> frontendService
           ).orNotFound
 
           val corsApp = CORS.policy.withAllowOriginAll(httpApp)
