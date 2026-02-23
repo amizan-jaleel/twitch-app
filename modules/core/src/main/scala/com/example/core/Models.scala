@@ -36,3 +36,7 @@ case class TwitchSearchCategoriesResponse(
 case class AppConfig(
     twitchClientId: String
 ) derives Codec.AsObject
+
+case class FollowRequest(category: TwitchCategory) derives Codec.AsObject
+
+case class FollowedCategoriesResponse(categories: List[TwitchCategory]) derives Codec.AsObject

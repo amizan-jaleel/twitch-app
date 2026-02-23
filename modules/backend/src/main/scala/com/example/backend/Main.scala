@@ -12,15 +12,17 @@ import org.http4s.ember.server.*
 import org.http4s.implicits.*
 import org.http4s.server.Router
 import org.http4s.server.middleware.CORS
-import org.http4s.{HttpRoutes, ResponseCookie, StaticFile}
+import org.http4s.{HttpRoutes, Request, ResponseCookie, StaticFile}
 
 import java.util.UUID
-//import org.http4s.Method.*
 import com.example.core.*
 import org.http4s.{AuthScheme, Credentials, Header, Uri, UrlForm}
 import org.http4s.headers.{Authorization, Location}
 import org.http4s.server.staticcontent.*
 import org.typelevel.ci.*
+import doobie.*
+import doobie.implicits.*
+import doobie.h2.*
 
 case class SessionData(
     user: TwitchUser,
@@ -39,6 +41,24 @@ object Main extends IOApp.Simple:
     sys.exit(1)
   })
   private val redirectUri = "http://localhost:8080/auth/callback"
+
+  private def getSession(req: Request[IO], userSession: Ref[IO, Map[String, SessionData]]): IO[Option[SessionData]] = {
+    val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
+    sessionId.fold(IO.pure(None: Option[SessionData]))(id => userSession.get.map(_.get(id)))
+  }
+
+  private def initDb(xa: Transactor[IO]): IO[Unit] = {
+    val sql = sql"""
+      CREATE TABLE IF NOT EXISTS followed_categories (
+        user_id VARCHAR NOT NULL,
+        category_id VARCHAR NOT NULL,
+        name VARCHAR NOT NULL,
+        box_art_url VARCHAR NOT NULL,
+        PRIMARY KEY (user_id, category_id)
+      )
+    """.update.run
+    sql.transact(xa).void
+  }
 
   private def authRoutes(client: Client[IO], userSession: Ref[IO, Map[String, SessionData]]) = HttpRoutes.of[IO] {
     case GET -> Root / "auth" / "callback" :? CodeQueryParamMatcher(code) =>
@@ -94,42 +114,57 @@ object Main extends IOApp.Simple:
   private object CodeQueryParamMatcher extends QueryParamDecoderMatcher[String]("code")
   private object SearchQueryParamMatcher extends QueryParamDecoderMatcher[String]("query")
 
-  private def apiRoutes(client: Client[IO], userSession: Ref[IO, Map[String, SessionData]]) = HttpRoutes.of[IO] {
+  private def apiRoutes(client: Client[IO], userSession: Ref[IO, Map[String, SessionData]], xa: Transactor[IO]) = HttpRoutes.of[IO] {
     case GET -> Root / "config" =>
       Ok(AppConfig(clientId))
     case GET -> Root / "ping" =>
       IO.println("Received ping request, responding with pong") *> Ok(Ping("pong"))
     case req @ GET -> Root / "user" =>
-      val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
-      sessionId match {
-        case Some(id) =>
-          userSession.get.flatMap { sessions =>
-            sessions.get(id) match {
-              case Some(data) => Ok(data.user)
-              case None       => NotFound("No user logged in")
-            }
-          }
-        case None => NotFound("No session found")
+      getSession(req, userSession).flatMap {
+        case Some(data) => Ok(data.user)
+        case None       => NotFound("Not logged in")
+      }
+    case req @ GET -> Root / "followed" =>
+      getSession(req, userSession).flatMap {
+        case Some(data) =>
+          sql"SELECT category_id, name, box_art_url FROM followed_categories WHERE user_id = ${data.user.id}"
+            .query[TwitchCategory]
+            .to[List]
+            .transact(xa)
+            .flatMap(cats => Ok(FollowedCategoriesResponse(cats)))
+        case None => Forbidden("Not logged in")
+      }
+    case req @ POST -> Root / "follow" =>
+      req.as[FollowRequest].flatMap { followReq =>
+        getSession(req, userSession).flatMap {
+          case Some(data) =>
+            sql"""
+              MERGE INTO followed_categories (user_id, category_id, name, box_art_url)
+              KEY(user_id, category_id)
+              VALUES (${data.user.id}, ${followReq.category.id}, ${followReq.category.name}, ${followReq.category.box_art_url})
+            """.update.run.transact(xa) *> Ok("Followed")
+          case None => Forbidden("Not logged in")
+        }
+      }
+    case req @ POST -> Root / "unfollow" / categoryId =>
+      getSession(req, userSession).flatMap {
+        case Some(data) =>
+          sql"DELETE FROM followed_categories WHERE user_id = ${data.user.id} AND category_id = $categoryId"
+            .update.run.transact(xa) *> Ok("Unfollowed")
+        case None => Forbidden("Not logged in")
       }
     case req @ GET -> Root / "search" / "categories" :? SearchQueryParamMatcher(query) =>
-      val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
-      sessionId match {
-        case Some(id) =>
-          userSession.get.flatMap { sessions =>
-            sessions.get(id) match {
-              case Some(data) =>
-                val uri = uri"https://api.twitch.tv/helix/search/categories".withQueryParam("query", query)
-                client.expect[TwitchSearchCategoriesResponse](
-                  GET(
-                    uri,
-                    Authorization(Credentials.Token(AuthScheme.Bearer, data.accessToken)),
-                    Header.Raw(ci"Client-Id", clientId)
-                  )
-                ).flatMap(Ok(_))
-              case None => Forbidden("Not logged in")
-            }
-          }
-        case None => Forbidden("No session cookie")
+      getSession(req, userSession).flatMap {
+        case Some(data) =>
+          val uri = uri"https://api.twitch.tv/helix/search/categories".withQueryParam("query", query)
+          client.expect[TwitchSearchCategoriesResponse](
+            GET(
+              uri,
+              Authorization(Credentials.Token(AuthScheme.Bearer, data.accessToken)),
+              Header.Raw(ci"Client-Id", clientId)
+            )
+          ).flatMap(Ok(_))
+        case None => Forbidden("Not logged in")
       }
     case req @ POST -> Root / "logout" =>
       val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
@@ -145,34 +180,43 @@ object Main extends IOApp.Simple:
   }
 
   def run: IO[Unit] =
-    for {
-      userSession <- IO.ref[Map[String, SessionData]](Map.empty)
-      _ <- EmberClientBuilder.default[IO].build.use { client =>
-        val host = host"0.0.0.0"
-        val port = port"8080"
-        
-        val frontendService = fileService[IO](FileService.Config("./modules/frontend"))
-        
-        val httpApp = Router(
-          "/api" -> apiRoutes(client, userSession),
-          "/" -> authRoutes(client, userSession),
-          "/" -> HttpRoutes.of[IO] {
-            case req @ GET -> Root =>
-              StaticFile.fromPath(fs2.io.file.Path("./modules/frontend/index.html"), Some(req)).getOrElseF(NotFound())
-          },
-          "/" -> frontendService,
-          "/" -> helloWorldService
-        ).orNotFound
-        
-        val corsApp = CORS.policy.withAllowOriginAll(httpApp)
-        
-        IO.println(s"Server started at http://localhost:$port") *>
-          EmberServerBuilder
-          .default[IO]
-          .withHost(host)
-          .withPort(port)
-          .withHttpApp(corsApp)
-          .build
-          .useForever
-      }
-    } yield ()
+    val dbUrl = "jdbc:h2:./twitch_app_db;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
+    val transactorResource = for {
+      ec <- Resource.eval(IO.executionContext)
+      xa <- H2Transactor.newH2Transactor[IO](dbUrl, "sa", "", ec)
+    } yield xa
+
+    transactorResource.use { xa =>
+      for {
+        _ <- initDb(xa)
+        userSession <- IO.ref[Map[String, SessionData]](Map.empty)
+        _ <- EmberClientBuilder.default[IO].build.use { client =>
+          val host = host"0.0.0.0"
+          val port = port"8080"
+
+          val frontendService = fileService[IO](FileService.Config("./modules/frontend"))
+
+          val httpApp = Router(
+            "/api" -> apiRoutes(client, userSession, xa),
+            "/" -> authRoutes(client, userSession),
+            "/" -> HttpRoutes.of[IO] {
+              case req @ GET -> Root =>
+                StaticFile.fromPath(fs2.io.file.Path("./modules/frontend/index.html"), Some(req)).getOrElseF(NotFound())
+            },
+            "/" -> frontendService,
+            "/" -> helloWorldService
+          ).orNotFound
+
+          val corsApp = CORS.policy.withAllowOriginAll(httpApp)
+
+          IO.println(s"Server started at http://localhost:$port") *>
+            EmberServerBuilder
+              .default[IO]
+              .withHost(host)
+              .withPort(port)
+              .withHttpApp(corsApp)
+              .build
+              .useForever
+        }
+      } yield ()
+    }

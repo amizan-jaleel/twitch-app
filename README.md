@@ -69,6 +69,7 @@ The app now supports Twitch OAuth2 login:
    - The backend exchanges the code for a token and fetches your user profile.
    - **Session Management**: The backend generates a unique session ID for each login and stores it in an `HttpOnly` cookie. This ensures that multiple users can use the app from different browsers without seeing each other's data.
    - **Logout**: You can now log out, which clears the session on both the client (cookie) and the server (session store).
+- **Persistence**: The app now uses an **H2 database** (stored in `twitch_app_db.mv.db`) to persist your followed categories. This ensures that even if you restart the server, your followed categories remain saved.
 
 #### Functional Programming (FP)
 

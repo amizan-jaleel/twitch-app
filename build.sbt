@@ -47,6 +47,10 @@ lazy val backend = project.in(file("modules/backend"))
       "org.http4s"    %% "http4s-ember-client" % "0.23.30",
       "org.http4s"    %% "http4s-dsl"          % "0.23.30",
       "org.http4s"    %% "http4s-circe"        % "0.23.30",
-      "ch.qos.logback" % "logback-classic"     % "1.5.16"
+      "ch.qos.logback" % "logback-classic"     % "1.5.16",
+      "org.tpolecat"  %% "doobie-core"         % "1.0.0-RC8",
+      "org.tpolecat"  %% "doobie-h2"           % "1.0.0-RC8",
+      "org.tpolecat"  %% "doobie-hikari"       % "1.0.0-RC8",
+      "com.h2database" % "h2"                  % "2.3.232"
     )
   )

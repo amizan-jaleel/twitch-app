@@ -46,3 +46,8 @@ build/
 
 ### Scala ###
 .bsp/
+
+### Databases ###
+*.db
+*.mv.db
+*.trace.db
