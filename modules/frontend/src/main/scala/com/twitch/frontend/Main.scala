@@ -1,4 +1,4 @@
-package com.example.frontend
+package com.twitch.frontend
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global

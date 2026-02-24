@@ -1,9 +1,9 @@
-package com.example.backend
+package com.twitch.backend
 
 import cats.effect.*
 import doobie.*
 import doobie.implicits.*
-import com.example.core.TwitchCategory
+import com.twitch.core.TwitchCategory
 
 class Database(xa: Transactor[IO]):
 

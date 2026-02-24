@@ -1,4 +1,4 @@
-package com.example.backend
+package com.twitch.backend
 
 import cats.effect.*
 import org.http4s.*
@@ -11,7 +11,7 @@ import org.http4s.implicits.*
 import org.http4s.headers.{Authorization, Location}
 import org.typelevel.ci.*
 import java.util.UUID
-import com.example.core.*
+import com.twitch.core.*
 
 case class SessionData(
     user: TwitchUser,

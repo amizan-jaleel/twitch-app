@@ -1,6 +1,6 @@
-package com.example.frontend
+package com.twitch.frontend
 
-import com.example.core.{TwitchUser, TwitchCategory}
+import com.twitch.core.{TwitchUser, TwitchCategory}
 
 case class Model(
     status: Option[String], 

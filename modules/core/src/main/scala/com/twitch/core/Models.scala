@@ -1,4 +1,4 @@
-package com.example.core
+package com.twitch.core
 
 import io.circe.Codec
 

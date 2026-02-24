@@ -1,4 +1,4 @@
-package com.example.backend
+package com.twitch.backend
 
 import cats.effect.*
 import com.comcast.ip4s.*

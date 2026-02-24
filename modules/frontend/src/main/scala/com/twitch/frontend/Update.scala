@@ -1,9 +1,9 @@
-package com.example.frontend
+package com.twitch.frontend
 
 import tyrian.*
 import tyrian.http.*
 import cats.effect.IO
-import com.example.core.FollowRequest
+import com.twitch.core.FollowRequest
 import io.circe.syntax.*
 
 object Update:

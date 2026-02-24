@@ -20,7 +20,7 @@ The project uses a `modules/` directory to separate these three distinct compone
 
 #### Running the Backend
 
-- In IntelliJ, find `modules/backend/src/main/scala/com/example/backend/TwitchServer.scala`.
+- In IntelliJ, find `modules/backend/src/main/scala/com/twitch/backend/TwitchServer.scala`.
 - Right-click the `TwitchServer` object and select "Run 'TwitchServer'".
 - The server will start at `http://localhost:8080`.
 

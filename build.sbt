@@ -4,7 +4,7 @@ val scala3Version = "3.6.3"
 
 ThisBuild / scalaVersion := scala3Version
 ThisBuild / version      := "0.1.0-SNAPSHOT"
-ThisBuild / organization := "com.example"
+ThisBuild / organization := "com.twitch"
 
 lazy val root = project.in(file("."))
   .aggregate(core.jvm, core.js, frontend, backend)
@@ -32,7 +32,7 @@ lazy val frontend = project.in(file("modules/frontend"))
   .settings(
     name := "frontend",
     scalaJSUseMainModuleInitializer := true,
-    Compile / mainClass := Some("com.example.frontend.Main"),
+    Compile / mainClass := Some("com.twitch.frontend.Main"),
     libraryDependencies ++= Seq(
       "io.indigoengine" %%% "tyrian" % "0.11.0"
     )

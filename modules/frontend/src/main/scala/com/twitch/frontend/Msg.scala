@@ -1,6 +1,6 @@
-package com.example.frontend
+package com.twitch.frontend
 
-import com.example.core.{TwitchUser, AppConfig, TwitchCategory, TwitchSearchCategoriesResponse, FollowedCategoriesResponse}
+import com.twitch.core.{TwitchUser, AppConfig, TwitchCategory, TwitchSearchCategoriesResponse, FollowedCategoriesResponse}
 import tyrian.http.*
 import io.circe.parser.decode
 

@@ -1,4 +1,4 @@
-package com.example.frontend
+package com.twitch.frontend
 
 import tyrian.Html.*
 import tyrian.*
