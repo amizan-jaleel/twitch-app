@@ -5,36 +5,39 @@ import tyrian.*
 
 object View:
   def view(model: Model): Html[Msg] =
-    div(
+    div(style("width", "100%"), style("display", "flex"), style("flex-direction", "column"), style("align-items", "center"))(
       h1("Twitch App"),
-      div(
+      div(style("margin-bottom", "20px"))(
         if (model.user.isEmpty)
           button(onClick(Msg.LoginWithTwitch), style("background", "#9146ff"))("Login with Twitch")
         else
           span()
       ),
-      model.status.map(s => p(style("font-weight", "bold"))(s)).getOrElse(div()),
+      model.status.map(s => p(style("font-weight", "bold"), style("color", "#9146ff"))(s)).getOrElse(div()),
       
-      model.user.map(u => div(
+      model.user.map(u => div(style("width", "100%"), style("display", "flex"), style("flex-direction", "column"), style("align-items", "center"))(
         h2(s"Welcome, ${u.display_name}!"),
-        img(src := u.profile_image_url, style("border-radius", "50%"), style("width", "50px")),
-        span(" "),
+        img(src := u.profile_image_url, style("border-radius", "50%"), style("width", "80px"), style("margin-bottom", "10px")),
         button(onClick(Msg.Logout), style("background", "#ff4646"))("Logout"),
         
-        hr(),
+        hr(style("width", "100%"), style("margin", "20px 0")),
         
         h3("Search Categories"),
-        div(
+        div(style("display", "flex"), style("gap", "10px"), style("justify-content", "center"), style("margin-bottom", "20px"))(
           input(
             `type` := "text",
             placeholder := "Search for a category...",
             value := model.searchQuery,
-            onInput(q => Msg.UpdateSearchQuery(q))
+            onInput(q => Msg.UpdateSearchQuery(q)),
+            style("padding", "0.5rem"),
+            style("border", "1px solid #ddd"),
+            style("border-radius", "4px"),
+            style("width", "250px")
           ),
           button(onClick(Msg.SearchCategories))("Search")
         ),
         
-        div(style("display", "flex"), style("flex-wrap", "wrap"), style("justify-content", "center"), style("margin-top", "20px"))(
+        div(style("display", "flex"), style("flex-wrap", "wrap"), style("justify-content", "center"), style("margin-top", "10px"))(
           model.searchResults.map { cat =>
             val isSelected = model.selectedCategoryIds.contains(cat.id)
             val isFollowed = model.followedCategories.exists(_.id == cat.id)
@@ -46,24 +49,30 @@ object View:
               style("border", if (isSelected) "2px solid #9146ff" else "1px solid #ddd"),
               style("border-radius", "8px"),
               style("width", "160px"),
-              style("background", if (isSelected) "#f0e6ff" else "white")
+              style("background", if (isSelected) "#f0e6ff" else "white"),
+              style("display", "flex"),
+              style("flex-direction", "column"),
+              style("align-items", "center")
             )(
               div(
                 onClick(Msg.ToggleCategorySelection(cat.id)),
-                style("cursor", "pointer")
+                style("cursor", "pointer"),
+                style("display", "flex"),
+                style("flex-direction", "column"),
+                style("align-items", "center")
               )(
                 img(src := boxArtUrl, style("width", "140px"), style("height", "185px"), style("border-radius", "4px")),
-                p(style("font-size", "0.9rem"), style("font-weight", "bold"), style("margin", "5px 0"))(cat.name)
+                p(style("font-size", "0.9rem"), style("font-weight", "bold"), style("margin", "5px 0"), style("text-align", "center"))(cat.name)
               ),
               if (isFollowed)
-                button(onClick(Msg.UnfollowCategory(cat.id)), style("background", "#ff4646"), style("width", "100%"), style("margin-top", "5px"))("Unfollow")
+                button(onClick(Msg.UnfollowCategory(cat.id)), style("background", "#ff4646"), style("margin-top", "5px"), style("padding", "5px 10px"))("Unfollow")
               else
-                button(onClick(Msg.FollowCategory(cat)), style("background", "#9146ff"), style("width", "100%"), style("margin-top", "5px"))("Follow")
+                button(onClick(Msg.FollowCategory(cat)), style("background", "#9146ff"), style("margin-top", "5px"), style("padding", "5px 10px"))("Follow")
             )
           }
         ),
         
-        hr(),
+        hr(style("width", "100%"), style("margin", "20px 0")),
         h3("Your Followed Categories"),
         if (model.followedCategories.isEmpty)
           p("You haven't followed any categories yet.")
@@ -76,12 +85,15 @@ object View:
                 style("padding", "10px"),
                 style("border", "1px solid #ddd"),
                 style("border-radius", "8px"),
-                style("width", "100px"),
-                style("background", "white")
+                style("width", "120px"),
+                style("background", "white"),
+                style("display", "flex"),
+                style("flex-direction", "column"),
+                style("align-items", "center")
               )(
                 img(src := boxArtUrl, style("width", "70px"), style("height", "92px"), style("border-radius", "4px")),
-                p(style("font-size", "0.7rem"), style("font-weight", "bold"), style("margin", "5px 0"), style("overflow", "hidden"), style("text-overflow", "ellipsis"), style("white-space", "nowrap"))(cat.name),
-                button(onClick(Msg.UnfollowCategory(cat.id)), style("background", "#ff4646"), style("font-size", "0.7rem"), style("padding", "2px 5px"), style("width", "100%"))("Unfollow")
+                p(style("font-size", "0.7rem"), style("font-weight", "bold"), style("margin", "5px 0"), style("overflow", "hidden"), style("text-overflow", "ellipsis"), style("white-space", "nowrap"), style("width", "100%"), style("text-align", "center"))(cat.name),
+                button(onClick(Msg.UnfollowCategory(cat.id)), style("background", "#ff4646"), style("font-size", "0.7rem"), style("padding", "2px 5px"))("Unfollow")
               )
             }
           )
