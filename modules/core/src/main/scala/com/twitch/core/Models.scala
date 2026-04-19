@@ -37,6 +37,19 @@ case class TwitchSearchCategoriesResponse(
     pagination: Option[TwitchPagination]
 ) derives Codec.AsObject
 
+case class TwitchChannel(
+    id: String,
+    broadcaster_login: String,
+    display_name: String,
+    thumbnail_url: String,
+    is_live: Boolean
+) derives Codec.AsObject
+
+case class TwitchSearchChannelsResponse(
+    data: List[TwitchChannel],
+    pagination: Option[TwitchPagination]
+) derives Codec.AsObject
+
 case class AppConfig(
     twitchClientId: String
 ) derives Codec.AsObject

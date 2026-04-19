@@ -85,6 +85,13 @@ object ApiClient:
       .withContentType(`Content-Type`(MediaType.application.json))
     httpClient.expect[String](req).void
 
+  def searchChannels(query: String): IO[List[TwitchChannel]] =
+    val uri = Uri.unsafeFromString("/api/search/channels").withQueryParam("query", query)
+    httpClient.expect[String](uri).attempt.map {
+      case Right(body) => decode[TwitchSearchChannelsResponse](body).map(_.data).getOrElse(Nil)
+      case Left(_)     => Nil
+    }
+
   def fetchIgnoredStreamers: IO[List[IgnoredStreamer]] =
     httpClient.expect[String](Uri.unsafeFromString("/api/ignored-streamers")).attempt.map {
       case Right(body) => decode[IgnoredStreamersResponse](body).map(_.streamers).getOrElse(Nil)

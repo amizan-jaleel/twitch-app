@@ -204,6 +204,22 @@ class Routes(
           }
         case None => Forbidden("Not logged in")
       }
+    case req @ GET -> Root / "search" / "channels" :? SearchQueryParamMatcher(query) +& AfterQueryParamMatcher(after) =>
+      getSession(req).flatMap {
+        case Some(data) =>
+          refreshTokenIfNeeded(data).flatMap { refreshed =>
+            val uri = uri"https://api.twitch.tv/helix/search/channels"
+              .withQueryParam("query", query)
+              .withQueryParam("first", settings.searchPageSize.toString)
+              .withOptionQueryParam("after", after)
+            val searchReq = Request[IO](method = Method.GET, uri = uri).putHeaders(
+              Authorization(Credentials.Token(AuthScheme.Bearer, refreshed.accessToken)),
+              Header.Raw(ci"Client-Id", clientId)
+            )
+            client.expect[TwitchSearchChannelsResponse](searchReq).flatMap(Ok(_))
+          }
+        case None => Forbidden("Not logged in")
+      }
     case req @ POST -> Root / "logout" =>
       val sessionId = req.cookies.find(_.name == "session_id").map(_.content)
       for {

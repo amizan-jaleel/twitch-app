@@ -17,5 +17,7 @@ case class Model(
     tagFilters: List[TagFilter] = Nil,
     newIncludeTag: String = "",
     newExcludeTag: String = "",
-    ignoredStreamers: List[IgnoredStreamer] = Nil
+    ignoredStreamers: List[IgnoredStreamer] = Nil,
+    streamerSearchQuery: String = "",
+    streamerSearchResults: List[TwitchChannel] = Nil
 )
