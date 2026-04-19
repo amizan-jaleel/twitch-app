@@ -69,3 +69,6 @@ android/
 
 ### Playwright ###
 .playwright-mcp/
+
+### Junie ###
+.junie/

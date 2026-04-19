@@ -54,3 +54,10 @@ object StreamLogic:
       val passesExclude = !streamTags.exists(excludeTags.contains)
       passesInclude && passesExclude
     }
+
+  def applyIgnoredStreamers(
+      notifications: List[StreamNotification],
+      ignoredStreamerIds: Set[String]
+  ): List[StreamNotification] =
+    if ignoredStreamerIds.isEmpty then notifications
+    else notifications.filterNot(n => ignoredStreamerIds.contains(n.streamerId))

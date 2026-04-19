@@ -5,7 +5,7 @@ import cats.syntax.all.*
 import doobie.*
 import doobie.implicits.*
 import cats.data.NonEmptyList
-import com.twitch.core.{TwitchCategory, TwitchUser, TagFilter}
+import com.twitch.core.{TwitchCategory, TwitchUser, TagFilter, IgnoredStreamer}
 import java.time.Instant
 
 enum SqlDialect:
@@ -75,7 +75,16 @@ class Database(xa: Transactor[IO], dialect: SqlDialect = SqlDialect.H2):
         sql"CREATE UNIQUE INDEX IF NOT EXISTS idx_push_user_token ON push_subscriptions (user_id, device_token)".update.run
       case SqlDialect.H2 =>
         sql"CREATE UNIQUE INDEX IF NOT EXISTS idx_push_user_token ON push_subscriptions (user_id, device_token)".update.run
-    (createFollowed *> createTagFilters *> createSessions *> createUsers *> migrateUsersAddLogin *> migrateUsersAddDisplayName *> createPushSubscriptions *> createPushUniqueIndex).transact(xa).void
+    val createIgnoredStreamers = sql"""
+      CREATE TABLE IF NOT EXISTS ignored_streamers (
+        user_id VARCHAR NOT NULL,
+        streamer_id VARCHAR NOT NULL,
+        streamer_login VARCHAR NOT NULL,
+        streamer_name VARCHAR NOT NULL,
+        PRIMARY KEY (user_id, streamer_id)
+      )
+    """.update.run
+    (createFollowed *> createTagFilters *> createIgnoredStreamers *> createSessions *> createUsers *> migrateUsersAddLogin *> migrateUsersAddDisplayName *> createPushSubscriptions *> createPushUniqueIndex).transact(xa).void
 
   def getFollowed(userId: String): IO[List[TwitchCategory]] =
     sql"SELECT category_id, name, box_art_url FROM followed_categories WHERE user_id = $userId"
@@ -135,6 +144,34 @@ class Database(xa: Transactor[IO], dialect: SqlDialect = SqlDialect.H2):
   def removeTagFilter(userId: String, filterType: String, tag: String): IO[Unit] =
     val normalizedTag = tag.trim.toLowerCase
     sql"DELETE FROM tag_filters WHERE user_id = $userId AND filter_type = $filterType AND tag = $normalizedTag"
+      .update.run.transact(xa).void
+
+  // ── Ignored streamers persistence ───────────────────────────────────
+
+  def getIgnoredStreamers(userId: String): IO[List[IgnoredStreamer]] =
+    sql"SELECT streamer_id, streamer_login, streamer_name FROM ignored_streamers WHERE user_id = $userId"
+      .query[IgnoredStreamer]
+      .to[List]
+      .transact(xa)
+
+  def addIgnoredStreamer(userId: String, streamerId: String, streamerLogin: String, streamerName: String): IO[Unit] =
+    val stmt = dialect match
+      case SqlDialect.Postgres =>
+        sql"""
+          INSERT INTO ignored_streamers (user_id, streamer_id, streamer_login, streamer_name)
+          VALUES ($userId, $streamerId, $streamerLogin, $streamerName)
+          ON CONFLICT (user_id, streamer_id) DO UPDATE SET streamer_login = EXCLUDED.streamer_login, streamer_name = EXCLUDED.streamer_name
+        """
+      case SqlDialect.H2 =>
+        sql"""
+          MERGE INTO ignored_streamers (user_id, streamer_id, streamer_login, streamer_name)
+          KEY(user_id, streamer_id)
+          VALUES ($userId, $streamerId, $streamerLogin, $streamerName)
+        """
+    stmt.update.run.transact(xa).void
+
+  def removeIgnoredStreamer(userId: String, streamerId: String): IO[Unit] =
+    sql"DELETE FROM ignored_streamers WHERE user_id = $userId AND streamer_id = $streamerId"
       .update.run.transact(xa).void
 
   // ── User persistence ────────────────────────────────────────────────

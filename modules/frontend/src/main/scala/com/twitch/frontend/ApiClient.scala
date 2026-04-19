@@ -85,6 +85,24 @@ object ApiClient:
       .withContentType(`Content-Type`(MediaType.application.json))
     httpClient.expect[String](req).void
 
+  def fetchIgnoredStreamers: IO[List[IgnoredStreamer]] =
+    httpClient.expect[String](Uri.unsafeFromString("/api/ignored-streamers")).attempt.map {
+      case Right(body) => decode[IgnoredStreamersResponse](body).map(_.streamers).getOrElse(Nil)
+      case Left(_)     => Nil
+    }
+
+  def addIgnoredStreamer(streamerId: String, streamerLogin: String, streamerName: String): IO[Unit] =
+    val req = Http4sRequest[IO](Method.POST, Uri.unsafeFromString("/api/ignored-streamers/add"))
+      .withEntity(AddIgnoredStreamerRequest(streamerId, streamerLogin, streamerName).asJson.noSpaces)
+      .withContentType(`Content-Type`(MediaType.application.json))
+    httpClient.expect[String](req).void
+
+  def removeIgnoredStreamer(streamerId: String): IO[Unit] =
+    val req = Http4sRequest[IO](Method.POST, Uri.unsafeFromString("/api/ignored-streamers/remove"))
+      .withEntity(RemoveIgnoredStreamerRequest(streamerId).asJson.noSpaces)
+      .withContentType(`Content-Type`(MediaType.application.json))
+    httpClient.expect[String](req).void
+
   def registerPushToken(token: String, platform: String): IO[Unit] =
     val req = Http4sRequest[IO](Method.POST, Uri.unsafeFromString("/api/push/register"))
       .withEntity(PushRegisterRequest(token, platform).asJson.noSpaces)

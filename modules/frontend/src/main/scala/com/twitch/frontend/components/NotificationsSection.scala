@@ -3,10 +3,10 @@ package com.twitch.frontend.components
 import calico.*
 import calico.html.io.{*, given}
 import cats.effect.*
+import com.twitch.core.*
+import com.twitch.frontend.Model
 import fs2.concurrent.*
 import fs2.dom.*
-import com.twitch.frontend.Model
-import com.twitch.core.*
 
 object NotificationsSection:
 
@@ -17,19 +17,20 @@ object NotificationsSection:
         cls := "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4",
         children <-- state.map { m =>
           val followedIds = m.followedCategories.map(_.id).toSet
-          val relevant = m.notifications.filter(n => followedIds.contains(n.categoryId))
+          val ignoredIds = m.ignoredStreamers.map(_.streamerId).toSet
+          val relevant = m.notifications.filter(n => followedIds.contains(n.categoryId) && !ignoredIds.contains(n.streamerId))
           if relevant.isEmpty then
             List(div(
               cls := "col-span-full text-center py-8",
               p(cls := "text-gray-500", "No streams detected live yet. Notifications will appear here.")
             ))
           else
-            relevant.map(notificationCard)
+            relevant.map(n => notificationCard(state, n))
         }
       )
     )
 
-  private def notificationCard(n: StreamNotification): Resource[IO, HtmlDivElement[IO]] =
+  private def notificationCard(state: SignallingRef[IO, Model], n: StreamNotification): Resource[IO, HtmlDivElement[IO]] =
     div(
       cls := "bg-twitch-dark-card rounded-xl border border-gray-800 overflow-hidden hover:border-twitch-live transition-all duration-200 cursor-pointer hover:shadow-lg group",
       onClick --> { _.foreach(_ =>
@@ -74,6 +75,10 @@ object NotificationsSection:
               tag
             )
           }
+        ),
+        div(
+          cls := "mt-1 flex justify-end",
+          IgnoredStreamersSection.ignoreButton(state, n)
         )
       )
     )

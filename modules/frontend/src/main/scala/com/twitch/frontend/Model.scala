@@ -16,5 +16,6 @@ case class Model(
     notifications: List[StreamNotification] = Nil,
     tagFilters: List[TagFilter] = Nil,
     newIncludeTag: String = "",
-    newExcludeTag: String = ""
+    newExcludeTag: String = "",
+    ignoredStreamers: List[IgnoredStreamer] = Nil
 )

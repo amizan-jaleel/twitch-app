@@ -215,3 +215,43 @@ class StreamLogicSpec extends FunSuite:
     val filters = List(TagFilter("include", "english"), TagFilter("include", "french"))
     assertEquals(StreamLogic.applyTagFilters(List(n), filters).size, 0)
   }
+
+  // ── applyIgnoredStreamers ─────────────────────────────────────────
+
+  private def mkNotificationWithStreamer(
+      streamerId: String,
+      streamerLogin: String = "login",
+      streamerName: String = "Name",
+      categoryId: String = "game1"
+  ): StreamNotification =
+    StreamNotification(categoryId, "Some Game", streamerId, streamerLogin, streamerName, "Playing games", 100, "thumb.jpg")
+
+  test("applyIgnoredStreamers: empty ignored set passes all notifications") {
+    val notifications = List(mkNotificationWithStreamer("u1"), mkNotificationWithStreamer("u2"))
+    val result = StreamLogic.applyIgnoredStreamers(notifications, Set.empty)
+    assertEquals(result.size, 2)
+  }
+
+  test("applyIgnoredStreamers: filters out ignored streamer") {
+    val notifications = List(mkNotificationWithStreamer("u1"), mkNotificationWithStreamer("u2"))
+    val result = StreamLogic.applyIgnoredStreamers(notifications, Set("u1"))
+    assertEquals(result.size, 1)
+    assertEquals(result.head.streamerId, "u2")
+  }
+
+  test("applyIgnoredStreamers: filters out all if all ignored") {
+    val notifications = List(mkNotificationWithStreamer("u1"), mkNotificationWithStreamer("u2"))
+    val result = StreamLogic.applyIgnoredStreamers(notifications, Set("u1", "u2"))
+    assertEquals(result.size, 0)
+  }
+
+  test("applyIgnoredStreamers: passes all if none match ignored set") {
+    val notifications = List(mkNotificationWithStreamer("u1"), mkNotificationWithStreamer("u2"))
+    val result = StreamLogic.applyIgnoredStreamers(notifications, Set("u99"))
+    assertEquals(result.size, 2)
+  }
+
+  test("applyIgnoredStreamers: handles empty notifications list") {
+    val result = StreamLogic.applyIgnoredStreamers(Nil, Set("u1"))
+    assertEquals(result, Nil)
+  }

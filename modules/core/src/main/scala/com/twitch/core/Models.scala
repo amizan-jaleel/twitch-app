@@ -91,6 +91,26 @@ case class AddTagFilterRequest(
     tag: String
 ) derives Codec.AsObject
 
+case class IgnoredStreamer(
+    streamerId: String,
+    streamerLogin: String,
+    streamerName: String
+) derives Codec.AsObject
+
+case class IgnoredStreamersResponse(
+    streamers: List[IgnoredStreamer]
+) derives Codec.AsObject
+
+case class AddIgnoredStreamerRequest(
+    streamerId: String,
+    streamerLogin: String,
+    streamerName: String
+) derives Codec.AsObject
+
+case class RemoveIgnoredStreamerRequest(
+    streamerId: String
+) derives Codec.AsObject
+
 case class PushRegisterRequest(
     token: String,
     platform: String

@@ -235,6 +235,29 @@ class Routes(
           case None => Forbidden("Not logged in")
         }
       }
+    case req @ GET -> Root / "ignored-streamers" =>
+      getSession(req).flatMap {
+        case Some(data) =>
+          db.getIgnoredStreamers(data.user.id).flatMap(streamers => Ok(IgnoredStreamersResponse(streamers)))
+        case None => Forbidden("Not logged in")
+      }
+    case req @ POST -> Root / "ignored-streamers" / "add" =>
+      req.as[AddIgnoredStreamerRequest].flatMap { body =>
+        getSession(req).flatMap {
+          case Some(data) =>
+            if body.streamerId.trim.isEmpty then BadRequest("streamerId is required")
+            else db.addIgnoredStreamer(data.user.id, body.streamerId, body.streamerLogin, body.streamerName) *> Ok("Streamer ignored")
+          case None => Forbidden("Not logged in")
+        }
+      }
+    case req @ POST -> Root / "ignored-streamers" / "remove" =>
+      req.as[RemoveIgnoredStreamerRequest].flatMap { body =>
+        getSession(req).flatMap {
+          case Some(data) =>
+            db.removeIgnoredStreamer(data.user.id, body.streamerId) *> Ok("Streamer unignored")
+          case None => Forbidden("Not logged in")
+        }
+      }
     case req @ POST -> Root / "push" / "register" =>
       req.as[PushRegisterRequest].flatMap { body =>
         getSession(req).flatMap {
