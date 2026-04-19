@@ -20,82 +20,84 @@ class PushNotificationService(
     projectId: String,
     serviceAccountKey: ServiceAccountKey,
     parallelSends: Int,
-    db: Database
+    db: Database,
+    cachedToken: Ref[IO, Option[(String, Instant)]]
 ):
 
   private val fcmUri = Uri.unsafeFromString(
     s"https://fcm.googleapis.com/v1/projects/$projectId/messages:send"
   )
 
-  // Cached access token with expiry
-  private var cachedToken: Option[(String, Instant)] = None
-
   private def getAccessToken: IO[String] =
     IO.realTimeInstant.flatMap { now =>
-      cachedToken match
+      cachedToken.get.flatMap {
         case Some((token, expiry)) if now.isBefore(expiry.minusSeconds(60)) =>
           IO.pure(token)
         case _ =>
           fetchAccessToken.flatMap { case (token, expiresIn) =>
             val expiry = now.plusSeconds(expiresIn)
-            IO { cachedToken = Some((token, expiry)) } *> IO.pure(token)
+            cachedToken.set(Some((token, expiry))).as(token)
           }
+      }
     }
 
   private def fetchAccessToken: IO[(String, Long)] =
     IO.realTimeInstant.flatMap { now =>
-      val jwt = buildJwt(now)
-      val req = Request[IO](method = Method.POST, uri = uri"https://oauth2.googleapis.com/token")
-        .withEntity(UrlForm(
-          "grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer",
-          "assertion" -> jwt
-        ))
-      client.run(req).use { resp =>
-        resp.as[String].flatMap { body =>
-          jsonDecode[Json](body) match
-            case Right(json) =>
-              val token = json.hcursor.get[String]("access_token")
-              val expiresIn = json.hcursor.get[Long]("expires_in")
-              (token, expiresIn) match
-                case (Right(t), Right(e)) => IO.pure((t, e))
-                case _ => IO.raiseError(new RuntimeException(s"Failed to parse OAuth token response: $body"))
-            case Left(err) =>
-              IO.raiseError(new RuntimeException(s"Failed to parse OAuth response: $body"))
+      buildJwt(now).flatMap { jwt =>
+        val req = Request[IO](method = Method.POST, uri = uri"https://oauth2.googleapis.com/token")
+          .withEntity(UrlForm(
+            "grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion" -> jwt
+          ))
+        client.run(req).use { resp =>
+          resp.as[String].flatMap { body =>
+            jsonDecode[Json](body) match
+              case Right(json) =>
+                val token = json.hcursor.get[String]("access_token")
+                val expiresIn = json.hcursor.get[Long]("expires_in")
+                (token, expiresIn) match
+                  case (Right(t), Right(e)) => IO.pure((t, e))
+                  case _ => IO.raiseError(new RuntimeException(s"Failed to parse OAuth token response: $body"))
+              case Left(err) =>
+                IO.raiseError(new RuntimeException(s"Failed to parse OAuth response: $body"))
+          }
         }
       }
     }
 
-  private def buildJwt(now: Instant): String =
-    val header = Json.obj(
-      "alg" -> "RS256".asJson,
-      "typ" -> "JWT".asJson
-    )
-    val claims = Json.obj(
-      "iss" -> serviceAccountKey.clientEmail.asJson,
-      "scope" -> "https://www.googleapis.com/auth/firebase.messaging".asJson,
-      "aud" -> "https://oauth2.googleapis.com/token".asJson,
-      "iat" -> now.getEpochSecond.asJson,
-      "exp" -> now.plusSeconds(3600).getEpochSecond.asJson
-    )
-    val encoder = Base64.getUrlEncoder.withoutPadding
-    val headerB64 = encoder.encodeToString(header.noSpaces.getBytes("UTF-8"))
-    val claimsB64 = encoder.encodeToString(claims.noSpaces.getBytes("UTF-8"))
-    val signingInput = s"$headerB64.$claimsB64"
+  private def buildJwt(now: Instant): IO[String] =
+    IO.blocking {
+      val header = Json.obj(
+        "alg" -> "RS256".asJson,
+        "typ" -> "JWT".asJson
+      )
+      val claims = Json.obj(
+        "iss" -> serviceAccountKey.clientEmail.asJson,
+        "scope" -> "https://www.googleapis.com/auth/firebase.messaging".asJson,
+        "aud" -> "https://oauth2.googleapis.com/token".asJson,
+        "iat" -> now.getEpochSecond.asJson,
+        "exp" -> now.plusSeconds(3600).getEpochSecond.asJson
+      )
+      val encoder = Base64.getUrlEncoder.withoutPadding
+      val headerB64 = encoder.encodeToString(header.noSpaces.getBytes("UTF-8"))
+      val claimsB64 = encoder.encodeToString(claims.noSpaces.getBytes("UTF-8"))
+      val signingInput = s"$headerB64.$claimsB64"
 
-    val keyBytes = Base64.getDecoder.decode(
-      serviceAccountKey.privateKey
-        .replace("-----BEGIN PRIVATE KEY-----", "")
-        .replace("-----END PRIVATE KEY-----", "")
-        .replaceAll("\\s", "")
-    )
-    val keySpec = new PKCS8EncodedKeySpec(keyBytes)
-    val privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec)
-    val sig = java.security.Signature.getInstance("SHA256withRSA")
-    sig.initSign(privateKey)
-    sig.update(signingInput.getBytes("UTF-8"))
-    val signature = encoder.encodeToString(sig.sign())
+      val keyBytes = Base64.getDecoder.decode(
+        serviceAccountKey.privateKey
+          .replace("-----BEGIN PRIVATE KEY-----", "")
+          .replace("-----END PRIVATE KEY-----", "")
+          .replaceAll("\\s", "")
+      )
+      val keySpec = new PKCS8EncodedKeySpec(keyBytes)
+      val privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec)
+      val sig = java.security.Signature.getInstance("SHA256withRSA")
+      sig.initSign(privateKey)
+      sig.update(signingInput.getBytes("UTF-8"))
+      val signature = encoder.encodeToString(sig.sign())
 
-    s"$signingInput.$signature"
+      s"$signingInput.$signature"
+    }
 
   def sendToDevice(token: String, notification: StreamNotification): IO[SendResult] =
     getAccessToken.flatMap { accessToken =>

@@ -61,8 +61,9 @@ class Routes(
         ))
 
   private def refreshTokenIfNeeded(data: SessionData): IO[SessionData] =
+    val nowEpoch = Instant.now().getEpochSecond
     val needsRefresh = data.tokenExpiresAt.exists { expiresAt =>
-      Instant.now().getEpochSecond >= expiresAt - 300 // refresh 5 min before expiry
+      nowEpoch >= expiresAt - 300 // refresh 5 min before expiry
     }
     if !needsRefresh || data.refreshToken.isEmpty then IO.pure(data)
     else
@@ -77,13 +78,15 @@ class Routes(
       client.run(req).use { resp =>
         if resp.status.isSuccess then
           resp.as[TwitchTokenResponse].flatMap { tokenResp =>
-            val expiresAt = Some(Instant.now().plusSeconds(tokenResp.expires_in.toLong))
-            db.updateSessionToken(data.sessionId, tokenResp.access_token, tokenResp.refresh_token.orElse(data.refreshToken), expiresAt) *>
+            IO.realTimeInstant.flatMap { refreshNow =>
+              val expiresAt = Some(refreshNow.plusSeconds(tokenResp.expires_in.toLong))
+              db.updateSessionToken(data.sessionId, tokenResp.access_token, tokenResp.refresh_token.orElse(data.refreshToken), expiresAt) *>
               IO.pure(data.copy(
                 accessToken = tokenResp.access_token,
                 refreshToken = tokenResp.refresh_token.orElse(data.refreshToken),
                 tokenExpiresAt = expiresAt.map(_.getEpochSecond)
               ))
+            }
           }
         else IO.pure(data) // if refresh fails, try with existing token
       }
@@ -143,7 +146,8 @@ class Routes(
             db.updateLastLogin(user.id, user.login, user.display_name, user.email) *>
               (if !existing.welcomeEmailSent then sendWelcomeEmailIfNeeded(user) else IO.unit)
         sessionId = UUID.randomUUID().toString
-        tokenExpiresAt = Some(Instant.now().plusSeconds(tokenResponse.expires_in.toLong))
+        now <- IO.realTimeInstant
+        tokenExpiresAt = Some(now.plusSeconds(tokenResponse.expires_in.toLong))
         _ <- db.createSession(sessionId, user, tokenResponse.access_token, tokenResponse.refresh_token, tokenExpiresAt)
         res <- Found(Location(uri"/")).map(_.addCookie(ResponseCookie(
           "session_id", sessionId,

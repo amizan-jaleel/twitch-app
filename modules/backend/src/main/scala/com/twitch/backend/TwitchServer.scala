@@ -18,20 +18,23 @@ import com.twitch.core.StreamNotification
 
 object TwitchServer extends IOApp.Simple:
 
-  private val clientId = sys.env.getOrElse("TWITCH_CLIENT_ID", {
-    System.err.println("ERROR: TWITCH_CLIENT_ID environment variable is not set")
-    sys.exit(1)
-  })
-  private val clientSecret = sys.env.getOrElse("TWITCH_CLIENT_SECRET", {
-    System.err.println("ERROR: TWITCH_CLIENT_SECRET environment variable is not set")
-    sys.exit(1)
-  })
-  private val baseUrl = sys.env.getOrElse("BASE_URL", "http://localhost:8080")
-  private val redirectUri = s"$baseUrl/auth/callback"
-
-  private val settings = AppSettings.load
-
   def run: IO[Unit] =
+    for
+      clientId <- IO.blocking(sys.env.getOrElse("TWITCH_CLIENT_ID", {
+        System.err.println("ERROR: TWITCH_CLIENT_ID environment variable is not set")
+        sys.exit(1)
+      }))
+      clientSecret <- IO.blocking(sys.env.getOrElse("TWITCH_CLIENT_SECRET", {
+        System.err.println("ERROR: TWITCH_CLIENT_SECRET environment variable is not set")
+        sys.exit(1)
+      }))
+      baseUrl <- IO.blocking(sys.env.getOrElse("BASE_URL", "http://localhost:8080"))
+      redirectUri = s"$baseUrl/auth/callback"
+      settings <- IO.blocking(AppSettings.load)
+      _ <- start(clientId, clientSecret, baseUrl, redirectUri, settings)
+    yield ()
+
+  private def start(clientId: String, clientSecret: String, baseUrl: String, redirectUri: String, settings: AppSettings): IO[Unit] =
     val rawDbUrl = sys.env.getOrElse("DATABASE_URL",
       "jdbc:h2:./twitch_app_db;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE")
 
@@ -87,9 +90,11 @@ object TwitchServer extends IOApp.Simple:
                 case None => IO.none
             keyIO.flatMap {
               case Some(key) =>
-                IO.println("Push notifications enabled").as(
-                  Some(new PushNotificationService(client, key.projectId, key, settings.pushParallelSends, db))
-                )
+                IO.ref(Option.empty[(String, java.time.Instant)]).flatMap { tokenRef =>
+                  IO.println("Push notifications enabled").as(
+                    Some(new PushNotificationService(client, key.projectId, key, settings.pushParallelSends, db, tokenRef))
+                  )
+                }
               case None =>
                 IO.println("Push notifications disabled (set FCM_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_KEY)").as(None)
             }.handleErrorWith { err =>

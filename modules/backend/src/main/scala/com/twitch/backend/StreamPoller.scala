@@ -10,7 +10,6 @@ import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.headers.Authorization
 import org.http4s.implicits.*
 import org.typelevel.ci.*
-import java.time.Instant
 import com.twitch.core.*
 
 class StreamPoller(
@@ -140,7 +139,7 @@ class StreamPoller(
       _ <- IO.whenA(allCategories.nonEmpty) {
         for
           streams <- withTokenRefresh(token => fetchLiveStreams(token, allCategories.map(_.id)))
-          now <- IO(Instant.now())
+          now <- IO.realTimeInstant
           alreadyNotified <- notifiedStreamIds.get
           (newStreams, updatedNotified) = StreamLogic.findNewStreams(streams, alreadyNotified, now, settings.recentlyLiveWindow)
           _ <- notifiedStreamIds.set(updatedNotified)
