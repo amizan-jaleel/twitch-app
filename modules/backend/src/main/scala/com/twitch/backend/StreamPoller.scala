@@ -76,6 +76,20 @@ class StreamPoller(
       go(None, Nil)
     }.map(_.flatten)
 
+  private def filteredNotificationsForUser(
+      userId: String,
+      byCategoryId: Map[String, List[StreamNotification]],
+      followedMap: Map[String, Set[String]],
+      filtersMap: Map[String, List[com.twitch.core.TagFilter]],
+      ignoredMap: Map[String, Set[String]]
+  ): List[StreamNotification] =
+    val userCategoryIds = followedMap.getOrElse(userId, Set.empty)
+    val relevantNotifications = userCategoryIds.flatMap(id => byCategoryId.getOrElse(id, Nil)).toList
+    StreamLogic.applyIgnoredStreamers(
+      StreamLogic.applyTagFilters(relevantNotifications, filtersMap.getOrElse(userId, Nil)),
+      ignoredMap.getOrElse(userId, Set.empty)
+    )
+
   private def broadcastNotifications(notifications: List[StreamNotification]): IO[Unit] =
     for
       queues <- notificationQueues.get
@@ -89,12 +103,7 @@ class StreamPoller(
       byCategoryId = notifications.groupBy(_.categoryId)
       // SSE delivery
       _ <- queues.values.toList.traverse_ { case (userId, queue) =>
-        val userCategoryIds = followedMap.getOrElse(userId, Set.empty)
-        val relevantNotifications = userCategoryIds.flatMap(id => byCategoryId.getOrElse(id, Nil)).toList
-        val filtered = StreamLogic.applyIgnoredStreamers(
-          StreamLogic.applyTagFilters(relevantNotifications, filtersMap.getOrElse(userId, Nil)),
-          ignoredMap.getOrElse(userId, Set.empty)
-        )
+        val filtered = filteredNotificationsForUser(userId, byCategoryId, followedMap, filtersMap, ignoredMap)
         filtered.traverse_(queue.offer)
       }
       // Push notification delivery (fire-and-forget)
@@ -117,12 +126,7 @@ class StreamPoller(
     db.getPushSubscriptionsForUsers(allFollowingUserIds).flatMap { subs =>
       val subsByUser = subs.groupBy(_.userId)
       subsByUser.toList.traverse_ { case (userId, userSubs) =>
-        val userCategoryIds = followedMap.getOrElse(userId, Set.empty)
-        val relevantNotifications = userCategoryIds.flatMap(id => byCategoryId.getOrElse(id, Nil)).toList
-        val filtered = StreamLogic.applyIgnoredStreamers(
-          StreamLogic.applyTagFilters(relevantNotifications, filtersMap.getOrElse(userId, Nil)),
-          ignoredMap.getOrElse(userId, Set.empty)
-        )
+        val filtered = filteredNotificationsForUser(userId, byCategoryId, followedMap, filtersMap, ignoredMap)
         if filtered.nonEmpty then ps.sendBatch(userSubs, filtered)
         else IO.unit
       }
