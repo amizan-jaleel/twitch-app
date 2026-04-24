@@ -22,13 +22,19 @@ class TopGamesPoller(
     client.expect[TwitchSearchCategoriesResponse](buildAuthedRequest(baseUri, token, cursor))
 
   private def fetchAllTopGames(token: String): IO[List[TwitchCategory]] =
-    fetchPaginated[TwitchCategory] { (tk, cur) =>
-      fetchTopGamesPage(tk, cur).map { resp =>
-        new PaginatedResponse[TwitchCategory]:
-          def pageData = resp.data
-          def pageCursor = resp.pagination.flatMap(_.cursor)
-      }
-    }(token).map(_.take(settings.topGamesCount))
+    val limit = settings.topGamesCount
+    def go(cursor: Option[String], acc: List[TwitchCategory]): IO[List[TwitchCategory]] =
+      if acc.size >= limit then IO.pure(acc.take(limit))
+      else
+        fetchTopGamesPage(token, cursor).flatMap { resp =>
+          val nextAcc = acc ::: resp.data
+          resp.pagination.flatMap(_.cursor) match
+            case Some(next) if resp.data.nonEmpty && nextAcc.size < limit =>
+              go(Some(next), nextAcc)
+            case _ =>
+              IO.pure(nextAcc.take(limit))
+        }
+    go(None, Nil)
 
   private def pollOnce: IO[Unit] =
     for
