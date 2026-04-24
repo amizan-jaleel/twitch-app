@@ -372,3 +372,49 @@ class RoutesSpec extends CatsEffectSuite:
       assert(chunk.contains("cat1"), s"Expected notification data, got: $chunk")
     }
   }
+
+  // ── Top game IDs endpoint ──────────────────────────────────────────
+
+  test("GET /top-game-ids returns Forbidden when not logged in") {
+    for
+      resp <- apiApp.run(Request[IO](Method.GET, uri"/top-game-ids"))
+    yield assertEquals(resp.status, Status.Forbidden)
+  }
+
+  test("GET /top-game-ids returns stored game IDs") {
+    val games = List(
+      TwitchCategory("game1", "Popular Game 1", "https://img.test/g1.jpg"),
+      TwitchCategory("game2", "Popular Game 2", "https://img.test/g2.jpg")
+    )
+    for
+      sid <- createSession
+      _ <- env.db.replaceTopGames(games)
+      resp <- apiApp.run(withSession(Request[IO](Method.GET, uri"/top-game-ids"), sid))
+      body <- resp.as[TopGameIdsResponse]
+    yield {
+      assertEquals(resp.status, Status.Ok)
+      assertEquals(body.gameIds, Set("game1", "game2"))
+    }
+  }
+
+  test("GET /top-game-ids returns empty set when no top games stored") {
+    for
+      sid <- createSession
+      _ <- env.db.replaceTopGames(Nil)
+      resp <- apiApp.run(withSession(Request[IO](Method.GET, uri"/top-game-ids"), sid))
+      body <- resp.as[TopGameIdsResponse]
+    yield {
+      assertEquals(resp.status, Status.Ok)
+      assertEquals(body.gameIds, Set.empty[String])
+    }
+  }
+
+  test("replaceTopGames overwrites previous data") {
+    val first = List(TwitchCategory("old1", "Old Game", "https://img.test/old.jpg"))
+    val second = List(TwitchCategory("new1", "New Game", "https://img.test/new.jpg"))
+    for
+      _ <- env.db.replaceTopGames(first)
+      _ <- env.db.replaceTopGames(second)
+      ids <- env.db.getTopGameIds
+    yield assertEquals(ids, Set("new1"))
+  }

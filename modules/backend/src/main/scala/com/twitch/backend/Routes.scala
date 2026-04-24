@@ -293,8 +293,11 @@ class Routes(
           case None => Forbidden("Not logged in")
         }
       }
-    case GET -> Root / "top-game-ids" =>
-      db.getTopGameIds.flatMap(ids => Ok(TopGameIdsResponse(ids)))
+    case req @ GET -> Root / "top-game-ids" =>
+      getSession(req).flatMap {
+        case Some(_) => db.getTopGameIds.flatMap(ids => Ok(TopGameIdsResponse(ids)))
+        case None    => Forbidden("Not logged in")
+      }
     case req @ GET -> Root / "notifications" / "stream" =>
       getSession(req).flatMap {
         case None => Forbidden("Not logged in")

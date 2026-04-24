@@ -5,6 +5,7 @@ import com.twitch.core.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.client.Client
 import org.http4s.implicits.*
+import scala.concurrent.duration.*
 
 class TopGamesPoller(
     clientId: String,
@@ -39,7 +40,11 @@ class TopGamesPoller(
 
   def start: IO[Nothing] =
     IO.println(s"TopGamesPoller: starting (polling every ${settings.topGamesPollInterval.toSeconds}s)") *>
-      pollOnce.handleErrorWith(e => IO.println(s"TopGamesPoller error: $e")) *>
+      pollOnce.handleErrorWith(e =>
+        IO.println(s"TopGamesPoller first poll failed: $e, retrying in 30s") *>
+          IO.sleep(30.seconds) *>
+          pollOnce.handleErrorWith(e2 => IO.println(s"TopGamesPoller retry also failed: $e2"))
+      ) *>
       (IO.sleep(settings.topGamesPollInterval) *> pollOnce.handleErrorWith(e => IO.println(s"TopGamesPoller error: $e"))).foreverM
 
 object TopGamesPoller:
