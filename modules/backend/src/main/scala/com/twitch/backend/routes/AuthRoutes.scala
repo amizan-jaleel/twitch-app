@@ -12,7 +12,7 @@ import org.http4s.implicits.*
 
 import com.twitch.backend.{EmailNotifier, TwitchApi}
 import com.twitch.backend.db.{SessionRepository, UserRepository}
-import com.twitch.core.TwitchUser
+import com.twitch.core.{TwitchTokenResponse, TwitchUser}
 
 class AuthRoutes(
   clientId: String,
@@ -42,6 +42,52 @@ class AuthRoutes(
         )
     }
 
+  private def validateOAuthState(state: String): IO[Unit] =
+    for {
+      pending <- pendingOAuthStates.get
+      _ <- IO.raiseUnless(pending.contains(state))(
+        new RuntimeException("Invalid OAuth state parameter"),
+      )
+      _ <- pendingOAuthStates.update(_ - state)
+    } yield ()
+
+  private def upsertUser(user: TwitchUser): IO[Unit] =
+    userRepo.findUser(user.id).flatMap {
+      case None =>
+        userRepo.insertUser(user.id, user.login, user.display_name, user.email) *>
+          sendWelcomeEmailIfNeeded(user)
+      case Some(existing) =>
+        userRepo.updateLastLogin(user.id, user.login, user.display_name, user.email) *>
+          (if !existing.welcomeEmailSent then sendWelcomeEmailIfNeeded(user) else IO.unit)
+    }
+
+  private def createSession(user: TwitchUser, tokenResponse: TwitchTokenResponse): IO[String] =
+    for {
+      sessionId <- IO(UUID.randomUUID().toString)
+      expiresAt = Some(Instant.now().plusSeconds(tokenResponse.expires_in.toLong))
+      _ <- sessionRepo.createSession(
+        sessionId,
+        user,
+        tokenResponse.access_token,
+        tokenResponse.refresh_token,
+        expiresAt,
+      )
+    } yield sessionId
+
+  private def sessionRedirect(sessionId: String): IO[Response[IO]] =
+    Found(Location(uri"/")).map(
+      _.addCookie(
+        ResponseCookie(
+          "session_id",
+          sessionId,
+          path = Some("/"),
+          httpOnly = true,
+          secure = secureCookies,
+          sameSite = Some(SameSite.Lax),
+        ),
+      ),
+    )
+
   private object CodeQueryParamMatcher extends QueryParamDecoderMatcher[String]("code")
   private object StateQueryParamMatcher extends QueryParamDecoderMatcher[String]("state")
 
@@ -57,46 +103,15 @@ class AuthRoutes(
           state,
         ) =>
       val flow = for {
-        pending <- pendingOAuthStates.get
-        _ <- IO.raiseUnless(pending.contains(state))(
-          new RuntimeException("Invalid OAuth state parameter"),
-        )
-        _ <- pendingOAuthStates.update(_ - state)
+        _ <- validateOAuthState(state)
         _ <- IO.println("Received auth callback")
         tokenResponse <- twitchApi.exchangeCode(code, redirectUri)
         _ <- IO.println("Token exchange successful")
         user <- twitchApi.getUser(tokenResponse.access_token)
         _ <- IO.println(s"Found user: ${user.display_name}")
-        existingUser <- userRepo.findUser(user.id)
-        _ <- existingUser match {
-          case None =>
-            userRepo.insertUser(user.id, user.login, user.display_name, user.email) *>
-              sendWelcomeEmailIfNeeded(user)
-          case Some(existing) =>
-            userRepo.updateLastLogin(user.id, user.login, user.display_name, user.email) *>
-              (if !existing.welcomeEmailSent then sendWelcomeEmailIfNeeded(user) else IO.unit)
-        }
-        sessionId = UUID.randomUUID().toString
-        tokenExpiresAt = Some(Instant.now().plusSeconds(tokenResponse.expires_in.toLong))
-        _ <- sessionRepo.createSession(
-          sessionId,
-          user,
-          tokenResponse.access_token,
-          tokenResponse.refresh_token,
-          tokenExpiresAt,
-        )
-        res <- Found(Location(uri"/")).map(
-          _.addCookie(
-            ResponseCookie(
-              "session_id",
-              sessionId,
-              path = Some("/"),
-              httpOnly = true,
-              secure = secureCookies,
-              sameSite = Some(SameSite.Lax),
-            ),
-          ),
-        )
+        _ <- upsertUser(user)
+        sessionId <- createSession(user, tokenResponse)
+        res <- sessionRedirect(sessionId)
       } yield res
 
       flow.handleErrorWith { err =>

@@ -3,7 +3,7 @@ package com.twitch.backend
 import cats.effect.*
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
-import org.http4s.client.Client
+import org.http4s.client.{Client, UnexpectedStatus}
 import org.http4s.implicits.*
 
 import com.twitch.core.{PaginatedResponse, TwitchTokenResponse}
@@ -47,8 +47,13 @@ abstract class TwitchPoller(
     }
 
   protected def withTokenRefresh[A](f: AppAccessToken ?=> IO[A]): IO[A] =
-    getOrRefreshToken.flatMap(t => f(using t)).handleErrorWith { _ =>
-      appToken.set(None) *> getOrRefreshToken.flatMap(t => f(using t))
+    getOrRefreshToken.flatMap(t => f(using t)).handleErrorWith { err =>
+      val desc = err match {
+        case UnexpectedStatus(status, _, _) => s"HTTP $status"
+        case _ => err.toString
+      }
+      IO.println(s"withTokenRefresh: refreshing after $desc") *>
+        appToken.set(None) *> getOrRefreshToken.flatMap(t => f(using t))
     }
 
   protected def buildAuthedRequest(
