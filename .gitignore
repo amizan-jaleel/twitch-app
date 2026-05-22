@@ -81,6 +81,7 @@ ios/App/App/*
 !ios/App/App/AppDelegate.swift
 !ios/App/App/Info.plist
 !ios/App/App/App.entitlements
+!ios/App/App/GoogleService-Info.plist.example
 !ios/App/App/Base.lproj/
 !ios/App/App/Assets.xcassets/
 ios/App/App/Assets.xcassets/*

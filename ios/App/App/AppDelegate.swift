@@ -1,28 +1,88 @@
 import UIKit
 import UserNotifications
 import Capacitor
+import CapacitorFirebaseMessagingIos
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
 
     var window: UIWindow?
+    private var hasRegisteredForRemoteNotifications = false
+    private var lastPostedFcmToken: String?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        if FirebaseApp.app() == nil {
+            if FirebaseOptions.defaultOptions() != nil {
+                FirebaseApp.configure()
+            } else {
+                print("GoogleService-Info.plist not found. iOS Firebase Messaging is disabled.")
+            }
+        }
+        if FirebaseApp.app() != nil {
+            Messaging.messaging().delegate = self
+        }
         UNUserNotificationCenter.current().delegate = self
-        application.registerForRemoteNotifications()
         return true
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+        guard FirebaseApp.app() != nil else {
+            NotificationCenter.default.post(
+                name: .capacitorDidFailToRegisterForRemoteNotifications,
+                object: PushRegistrationError.firebaseNotConfigured
+            )
+            return
+        }
+
+        Messaging.messaging().apnsToken = deviceToken
+        hasRegisteredForRemoteNotifications = true
+        Messaging.messaging().token { token, error in
+            if let error = error {
+                NotificationCenter.default.post(
+                    name: .capacitorDidFailToRegisterForRemoteNotifications,
+                    object: error
+                )
+                return
+            }
+
+            guard let token = token else {
+                NotificationCenter.default.post(
+                    name: .capacitorDidFailToRegisterForRemoteNotifications,
+                    object: PushRegistrationError.missingFcmToken
+                )
+                return
+            }
+
+            self.postFcmTokenIfNeeded(token)
+        }
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard hasRegisteredForRemoteNotifications, let fcmToken = fcmToken else { return }
+        postFcmTokenIfNeeded(fcmToken)
+    }
+
+    private func postFcmTokenIfNeeded(_ fcmToken: String) {
+        guard lastPostedFcmToken != fcmToken else { return }
+        lastPostedFcmToken = fcmToken
+        NotificationCenter.default.post(
+            name: .capacitorDidRegisterForRemoteNotifications,
+            object: fcmToken
+        )
+    }
+
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        // Data-only FCM message — show a local notification
+        // The backend sends iOS pushes as visible APNs alerts; legacy data-only messages fall through.
+        if let aps = userInfo["aps"] as? [AnyHashable: Any], aps["alert"] != nil {
+            completionHandler(.newData)
+            return
+        }
+
+        // Legacy data-only FCM message fallback.
         let title = userInfo["title"] as? String ?? "Stream is live!"
         let body = userInfo["body"] as? String ?? ""
 
@@ -78,4 +138,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 
+}
+
+enum PushRegistrationError: LocalizedError {
+    case firebaseNotConfigured
+    case missingFcmToken
+
+    var errorDescription: String? {
+        switch self {
+        case .firebaseNotConfigured:
+            return "Firebase is not configured. Add GoogleService-Info.plist to the iOS app target."
+        case .missingFcmToken:
+            return "Firebase Messaging did not return an FCM token."
+        }
+    }
 }

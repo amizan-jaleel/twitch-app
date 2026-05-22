@@ -172,8 +172,12 @@ In Xcode: select a simulator or physical device from the toolbar dropdown and pr
 **APNs setup (required for iOS push):**
 1. In [Apple Developer](https://developer.apple.com/account/resources/authkeys/list) > Keys > create a new key with APNs enabled, download the `.p8` file
 2. In [Firebase Console](https://console.firebase.google.com) > Project Settings > Cloud Messaging > Apple app configuration > upload the `.p8` key with your Key ID and Team ID
-3. Add the iOS app to Firebase and add its `GoogleService-Info.plist` to the Xcode target
-4. Add Firebase Messaging to the iOS target and update `AppDelegate.swift` to forward the Firebase registration token, not the raw APNs device token, because the backend sends via FCM
+3. Add the iOS app to Firebase with bundle ID `com.twitchnotify.app`
+4. Download the Firebase `GoogleService-Info.plist` and place it at `ios/App/App/GoogleService-Info.plist`
+5. Do not commit the real plist. `ios/App/App/GoogleService-Info.plist.example` documents the expected file shape, and the Xcode target copies the real local plist into the app bundle when it is present.
+6. Build and run on a physical iPhone or TestFlight build, allow notifications, then confirm `/api/push/register` receives an FCM registration token for platform `ios`.
+
+**iOS push architecture:** `AppDelegate.swift` configures Firebase, maps the APNs device token into Firebase Messaging, then forwards the Firebase Messaging registration token through Capacitor's push registration event. The backend sends iOS subscriptions as visible FCM/APNs alert pushes with `apns-push-type: alert` and `apns-priority: 10`, while Android keeps the existing data-only payload path. Verify foreground, background, and terminated delivery on a real iPhone before relying on production notifications.
 
 ### Tech Stack
 

@@ -115,21 +115,13 @@ class PushNotificationService(
     s"$signingInput.$signature"
   }
 
-  def sendToDevice(token: String, notification: StreamNotification): IO[SendResult] =
+  def sendToDevice(
+    subscription: PushSubscriptionRow,
+    notification: StreamNotification,
+  ): IO[SendResult] =
     getAccessToken
       .flatMap { accessToken =>
-        val payload = Json.obj(
-          "message" -> Json.obj(
-            "token" -> token.asJson,
-            "data" -> Json.obj(
-              "title" -> s"${notification.streamerName} is live!".asJson,
-              "body" -> s"Playing ${notification.categoryName}: ${notification.streamTitle}".asJson,
-              "streamerId" -> notification.streamerId.asJson,
-              "streamerLogin" -> notification.streamerLogin.asJson,
-              "categoryId" -> notification.categoryId.asJson,
-            ),
-          ),
-        )
+        val payload = PushNotificationService.messagePayload(subscription, notification)
 
         val req = Request[IO](method = Method.POST, uri = fcmUri)
           .withEntity(payload.noSpaces)
@@ -143,10 +135,13 @@ class PushNotificationService(
           else
             resp.as[String].flatMap { body =>
               if resp.status.code == 404 || body.contains("UNREGISTERED") then
-                pushRepo.deletePushSubscription(token).as(SendResult.InvalidToken)
+                pushRepo
+                  .deletePushSubscription(subscription.deviceToken)
+                  .as(SendResult.InvalidToken)
               else
-                IO.println(s"FCM error for token ${token.take(10)}...: ${resp.status} $body")
-                  .as(SendResult.Failed)
+                IO.println(
+                  s"FCM error for token ${subscription.deviceToken.take(10)}...: ${resp.status} $body",
+                ).as(SendResult.Failed)
             }
         }
       }
@@ -161,7 +156,7 @@ class PushNotificationService(
     val sends = for {
       sub <- subscriptions
       notif <- notifications
-    } yield sendToDevice(sub.deviceToken, notif)
+    } yield sendToDevice(sub, notif)
     sends.parTraverseN(parallelSends)(identity).void
   }
 
@@ -176,6 +171,59 @@ case class ServiceAccountKey(
   privateKey: String,
   projectId: String,
 )
+
+object PushNotificationService {
+
+  private[backend] def messagePayload(
+    subscription: PushSubscriptionRow,
+    notification: StreamNotification,
+  ): Json = {
+    val title = s"${notification.streamerName} is live!"
+    val body = s"Playing ${notification.categoryName}: ${notification.streamTitle}"
+    val data = Json.obj(
+      "title" -> title.asJson,
+      "body" -> body.asJson,
+      "streamerId" -> notification.streamerId.asJson,
+      "streamerLogin" -> notification.streamerLogin.asJson,
+      "categoryId" -> notification.categoryId.asJson,
+    )
+
+    val baseMessage = Json.obj(
+      "token" -> subscription.deviceToken.asJson,
+      "data" -> data,
+    )
+
+    val message =
+      if subscription.platform.equalsIgnoreCase("ios") then
+        baseMessage.deepMerge(
+          Json.obj(
+            "notification" -> Json.obj(
+              "title" -> title.asJson,
+              "body" -> body.asJson,
+            ),
+            "apns" -> Json.obj(
+              "headers" -> Json.obj(
+                "apns-push-type" -> "alert".asJson,
+                "apns-priority" -> "10".asJson,
+              ),
+              "payload" -> Json.obj(
+                "aps" -> Json.obj(
+                  "alert" -> Json.obj(
+                    "title" -> title.asJson,
+                    "body" -> body.asJson,
+                  ),
+                  "sound" -> "default".asJson,
+                ),
+              ),
+            ),
+          ),
+        )
+      else baseMessage
+
+    Json.obj("message" -> message)
+  }
+
+}
 
 object ServiceAccountKey {
 
