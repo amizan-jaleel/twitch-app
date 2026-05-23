@@ -440,24 +440,49 @@ class RoutesSpec extends CatsEffectSuite {
   test("GET /notifications/stream registers queue for logged-in user") {
     for {
       sid <- createSession
-      // We need to use the raw routes (not orNotFound) to get the response
-      // The SSE endpoint returns a streaming body, so we just check it starts OK
+      before <- env.notificationQueues.get
       resp <- apiApp.run(withSession(Request[IO](Method.GET, uri"/notifications/stream"), sid))
       queues <- env.notificationQueues.get
+      newQueues = queues -- before.keySet
     } yield {
       assertEquals(resp.status, Status.Ok)
-      assert(queues.contains(sid), "Expected notification queue registered for session")
-      val (userId, _) = queues(sid)
+      assertEquals(newQueues.size, 1, "Expected notification queue registered for connection")
+      val (connectionId, (userId, _)) = newQueues.head
+      assert(connectionId != sid, "Expected queue to be keyed by connection ID, not session ID")
       assertEquals(userId, "user1")
+    }
+  }
+
+  test("GET /notifications/stream registers distinct queues for same session in multiple tabs") {
+    for {
+      sid <- createSession
+      before <- env.notificationQueues.get
+      firstResp <- apiApp.run(withSession(Request[IO](Method.GET, uri"/notifications/stream"), sid))
+      secondResp <- apiApp.run(
+        withSession(Request[IO](Method.GET, uri"/notifications/stream"), sid),
+      )
+      queues <- env.notificationQueues.get
+      newQueues = queues -- before.keySet
+    } yield {
+      assertEquals(firstResp.status, Status.Ok)
+      assertEquals(secondResp.status, Status.Ok)
+      assertEquals(newQueues.size, 2, "Expected one queue per SSE connection")
+      assert(
+        !newQueues.contains(sid),
+        "Expected queues to be keyed by connection ID, not session ID",
+      )
+      assertEquals(newQueues.values.map(_._1).toSet, Set("user1"))
     }
   }
 
   test("SSE queue receives offered notification") {
     for {
       sid <- createSession
+      before <- env.notificationQueues.get
       resp <- apiApp.run(withSession(Request[IO](Method.GET, uri"/notifications/stream"), sid))
       queues <- env.notificationQueues.get
-      (_, queue) = queues(sid)
+      newQueues = queues -- before.keySet
+      (_, (_, queue)) = newQueues.head
       notification = StreamNotification(
         categoryId = "cat1",
         categoryName = "Test Game",

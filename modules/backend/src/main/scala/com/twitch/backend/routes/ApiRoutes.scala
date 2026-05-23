@@ -201,24 +201,22 @@ class ApiRoutes(
 
     case req @ GET -> Root / "notifications" / "stream" =>
       withSession(req) { data =>
-        val sessionId =
-          req.cookies.find(_.name == "session_id").map(_.content).getOrElse("unknown")
-        Queue.unbounded[IO, StreamNotification].flatMap { queue =>
-          notificationQueues.update(_ + (sessionId -> (data.user.id, queue))) *> {
-            val eventStream: fs2.Stream[IO, ServerSentEvent] =
-              fs2
-                .Stream
-                .fromQueueUnterminated(queue)
-                .map { n =>
-                  ServerSentEvent(
-                    data = Some(n.asJson.noSpaces),
-                    eventType = Some("stream-live"),
-                  )
-                }
-                .onFinalize(notificationQueues.update(_ - sessionId))
-            Ok(eventStream)
-          }
-        }
+        for {
+          connectionId <- IO.randomUUID.map(_.toString)
+          queue <- Queue.unbounded[IO, StreamNotification]
+          _ <- notificationQueues.update(_ + (connectionId -> (data.user.id, queue)))
+          eventStream = fs2
+            .Stream
+            .fromQueueUnterminated(queue)
+            .map { n =>
+              ServerSentEvent(
+                data = Some(n.asJson.noSpaces),
+                eventType = Some("stream-live"),
+              )
+            }
+            .onFinalize(notificationQueues.update(_ - connectionId))
+          response <- Ok(eventStream)
+        } yield response
       }
   }
 
