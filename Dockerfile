@@ -36,6 +36,10 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/modules/backend/target/scala-3.6.3/twitch-app.jar /app/twitch-app.jar
 COPY --from=build /app/static /app/static
 
