@@ -178,14 +178,24 @@ In Xcode: select a simulator or physical device from the toolbar dropdown and pr
 6. Do not commit the real plist. `ios/App/App/GoogleService-Info.plist.example` documents the expected file shape, and the Xcode target copies the real local plist into the app bundle when it is present.
 7. Build and run on a physical iPhone or TestFlight build, allow notifications, then confirm `/api/push/register` receives an FCM registration token for platform `ios`.
 
-**Before uploading to TestFlight:**
+**Uploading to TestFlight:**
 
-1. Run `./build-mobile.sh`
-2. Confirm `ios/App/App/GoogleService-Info.plist` exists locally
-3. Archive the shared `App` scheme in Release configuration
-4. Export the archive as an App Store Connect `.ipa`
-5. Run `scripts/verify-ios-ipa.sh path/to/App.ipa` before distributing it. For a TestFlight/App Store build, the verifier must report `aps-environment: production` and `GoogleService-Info.plist: present`.
-6. Upload the verified `.ipa` through Transporter or Xcode Organizer
+Use the one-shot script — it runs the frontend build, archives, signs, verifies, and (optionally) uploads:
+
+```bash
+scripts/build-ios-testflight.sh            # build + verify locally
+scripts/build-ios-testflight.sh --upload   # build + verify + upload to TestFlight
+```
+
+It auto-increments the build number (tracked in `ios/build-number.txt`) and refuses to upload unless `scripts/verify-ios-ipa.sh` confirms the IPA reports `aps-environment: production` and a bundled `GoogleService-Info.plist`. Prerequisite: `ios/App/App/GoogleService-Info.plist` present locally.
+
+For signing/upload auth, configure an App Store Connect API key (recommended — headless and durable, unlike a Xcode Apple ID session that expires): copy `scripts/.asc-api-key.env.example` to `scripts/.asc-api-key.env` (gitignored) and fill in the key. Without it, the script falls back to the Apple ID signed into Xcode (Settings > Accounts).
+
+Why a script instead of "Archive in Xcode"? Three non-obvious traps it handles for you:
+
+- **Homebrew `rsync` breaks the export.** Xcode's IPA packaging calls `/usr/bin/rsync -E`, but a Homebrew `rsync` earlier on `PATH` rejects Apple's `--extended-attributes` and fails with "Copy failed". The script forces `/usr/bin` first.
+- **A signed archive can't be produced here.** Automatic signing wants an iOS *Development* profile (needs a registered device — the team has none), ad-hoc signing is blocked on the current SDK, and the Distribution cert is cloud-managed (no local private key). An App Store Connect API key does **not** change this (the archive still demands a Development profile). So the script archives **unsigned** and lets `exportArchive` do the real (cloud) Distribution signing.
+- **The unsigned archive loses `aps-environment`.** An unsigned archive carries no entitlements, so the export re-derives them from the provisioning profile — which omits `aps-environment`, silently shipping a build with **no push**. The script first `codesign`-embeds `ios/appstore-entitlements.plist`, which the export then preserves.
 
 **iOS push architecture:** `AppDelegate.swift` configures Firebase, maps the APNs device token into Firebase Messaging, then forwards the Firebase Messaging registration token through Capacitor's push registration event. The backend sends iOS subscriptions as visible FCM/APNs alert pushes with `apns-push-type: alert` and `apns-priority: 10`, while Android keeps the existing data-only payload path. Verify foreground, background, and terminated delivery on a real iPhone before relying on production notifications.
 

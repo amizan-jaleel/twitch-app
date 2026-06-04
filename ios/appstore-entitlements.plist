@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements embedded into the unsigned archive's App.app before exportArchive
+  (see scripts/build-ios-testflight.sh). An unsigned archive carries no entitlements,
+  so exportArchive would otherwise re-derive them from the provisioning profile, which
+  does NOT include aps-environment — silently shipping a build with no push capability.
+  Embedding these first makes the export preserve aps-environment=production.
+-->
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>3757U37Z55.com.twitchnotify.app</string>
+	<key>aps-environment</key>
+	<string>production</string>
+	<key>beta-reports-active</key>
+	<true/>
+	<key>com.apple.developer.team-identifier</key>
+	<string>3757U37Z55</string>
+	<key>get-task-allow</key>
+	<false/>
+</dict>
+</plist>

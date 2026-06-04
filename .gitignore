@@ -37,6 +37,8 @@ bin/
 build/
 !**/src/main/**/build/
 !**/src/test/**/build/
+# Xcode build/derived data produced by scripts/build-ios-testflight.sh
+.derivedData/
 
 ### VS Code ###
 .vscode/
@@ -64,8 +66,12 @@ firebase/
 
 ### Capacitor ###
 www/
+# App Store Connect API key config — real values are secret; the .example is tracked.
+scripts/.asc-api-key.env
 ios/*
 !ios/debug.xcconfig
+!ios/appstore-entitlements.plist
+!ios/build-number.txt
 !ios/App/
 ios/App/*
 !ios/App/CapApp-SPM/
