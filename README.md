@@ -189,7 +189,7 @@ scripts/build-ios-testflight.sh --upload   # build + verify + upload to TestFlig
 
 It auto-increments the build number (tracked in `ios/build-number.txt`) and refuses to upload unless `scripts/verify-ios-ipa.sh` confirms the IPA reports `aps-environment: production` and a bundled `GoogleService-Info.plist`. Prerequisite: `ios/App/App/GoogleService-Info.plist` present locally.
 
-For signing/upload auth, configure an App Store Connect API key (recommended — headless and durable, unlike a Xcode Apple ID session that expires): copy `scripts/.asc-api-key.env.example` to `scripts/.asc-api-key.env` (gitignored) and fill in the key. Without it, the script falls back to the Apple ID signed into Xcode (Settings > Accounts).
+For auth, configure an App Store Connect API key: copy `scripts/.asc-api-key.env.example` to `scripts/.asc-api-key.env` (gitignored) and fill in the key. Build + verify also works with just the Apple ID signed into Xcode (Settings > Accounts), but `--upload` **requires** the API key — it uploads the exact IPA that was verified (via `altool`) rather than re-exporting, so the entitlement gate covers the shipped bytes.
 
 Why a script instead of "Archive in Xcode"? Three non-obvious traps it handles for you:
 

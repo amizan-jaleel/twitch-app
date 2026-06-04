@@ -38,7 +38,6 @@ cd "$REPO_ROOT"
 ARCHIVE="build/ios-archive/App.xcarchive"
 APP="$ARCHIVE/Products/Applications/App.app"
 EXPORT_DIR="build/export"
-UPLOAD_DIR="build/export-upload"
 DERIVED="$REPO_ROOT/.derivedData/ios-release"
 ENTITLEMENTS="ios/appstore-entitlements.plist"
 BUILD_NUMBER_FILE="ios/build-number.txt"
@@ -91,6 +90,12 @@ if [[ -n "${ASC_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" && -f "${ASC_KEY_PATH:-}" 
   AUTH_DESC="API key $ASC_KEY_ID"
 fi
 
+# --upload hands the verified IPA to altool, which needs the API key (it can't
+# use the Xcode Apple ID session). Fail early rather than deep in the upload.
+if $UPLOAD && [[ -z "${ASC_KEY_ID:-}" || -z "${ASC_ISSUER_ID:-}" || ! -f "${ASC_KEY_PATH:-}" ]]; then
+  fail "--upload requires an App Store Connect API key. Configure $ASC_KEY_ENV (see $ASC_KEY_ENV.example)."
+fi
+
 if [[ -z "$BUILD" ]]; then
   last="$(cat "$BUILD_NUMBER_FILE" 2>/dev/null || echo 0)"
   BUILD=$((last + 1))
@@ -128,15 +133,17 @@ codesign -f -s "$DEV_IDENTITY" \
   --entitlements "$ENTITLEMENTS" --generate-entitlement-der "$APP"
 
 # --- 4. export signed IPA + verify ------------------------------------------
+# Export to a local IPA (destination=export), NOT destination=upload. This lets
+# us verify the exact bytes we later hand to altool — so the entitlement gate
+# below actually covers the uploaded artifact rather than a second re-export.
 echo "==> [4/5] Exporting signed IPA and verifying entitlements"
 mkdir -p build
-write_export_options() { # $1 = destination (export|upload), $2 = output path
-  cat > "$2" <<PLIST
+cat > build/exportOptions-export.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>destination</key><string>$1</string>
+	<key>destination</key><string>export</string>
 	<key>method</key><string>app-store-connect</string>
 	<key>signingStyle</key><string>automatic</string>
 	<key>manageAppVersionAndBuildNumber</key><false/>
@@ -146,9 +153,7 @@ write_export_options() { # $1 = destination (export|upload), $2 = output path
 </dict>
 </plist>
 PLIST
-}
 
-write_export_options export build/exportOptions-export.plist
 rm -rf "$EXPORT_DIR"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" \
   -exportOptionsPlist build/exportOptions-export.plist \
@@ -165,13 +170,11 @@ if ! $UPLOAD; then
   exit 0
 fi
 
-echo "==> [5/5] Uploading build $BUILD to App Store Connect / TestFlight"
-write_export_options upload build/exportOptions-upload.plist
-rm -rf "$UPLOAD_DIR"
-xcodebuild -exportArchive -archivePath "$ARCHIVE" \
-  -exportOptionsPlist build/exportOptions-upload.plist \
-  -exportPath "$UPLOAD_DIR" -allowProvisioningUpdates \
-  ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}
+# Upload the SAME IPA that was just verified (altool uploads a pre-built file),
+# rather than re-exporting — so the gate above covers exactly what ships.
+echo "==> [5/5] Uploading the verified IPA (build $BUILD) to App Store Connect"
+xcrun altool --upload-app -f "$EXPORT_DIR/App.ipa" -t ios \
+  --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
 # Record the build number we just uploaded so the next run auto-increments.
 echo "$BUILD" > "$BUILD_NUMBER_FILE"
