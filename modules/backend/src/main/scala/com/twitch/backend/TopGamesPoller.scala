@@ -4,35 +4,33 @@ import scala.concurrent.duration.*
 
 import cats.effect.*
 import org.http4s.circe.CirceEntityDecoder.*
-import org.http4s.client.Client
 import org.http4s.implicits.*
 
 import com.twitch.backend.db.TopGamesRepository
 import com.twitch.core.{TwitchCategory, TwitchSearchCategoriesResponse}
 
 class TopGamesPoller(
-  appToken: Ref[IO, Option[AppAccessToken]],
-  client: Client[IO],
-  clientId: String,
-  clientSecret: String,
+  twitchClient: TwitchApiClient,
   settings: AppSettings,
   topGamesRepo: TopGamesRepository,
-) extends TwitchPoller(clientId, clientSecret, client, appToken) {
+) {
 
   private def fetchTopGamesPage(
     cursor: Option[String],
   )(using AppAccessToken): IO[TwitchSearchCategoriesResponse] = {
     val baseUri = uri"https://api.twitch.tv/helix/games/top"
       .withQueryParam("first", "100")
-    client.expect[TwitchSearchCategoriesResponse](buildAuthedRequest(baseUri, cursor))
+    twitchClient.client.expect[TwitchSearchCategoriesResponse](
+      twitchClient.buildAuthedRequest(baseUri, cursor),
+    )
   }
 
   private def fetchAllTopGames(using AppAccessToken): IO[List[TwitchCategory]] =
-    fetchPaginated[TwitchCategory](fetchTopGamesPage, limit = settings.topGamesCount)
+    twitchClient.fetchPaginated[TwitchCategory](fetchTopGamesPage, limit = settings.topGamesCount)
 
   private def pollOnce: IO[Unit] =
     for {
-      games <- withTokenRefresh(fetchAllTopGames)
+      games <- twitchClient.withTokenRefresh(fetchAllTopGames)
       unique = games.distinctBy(_.id)
       _ <- topGamesRepo.replaceTopGames(unique)
       _ <- IO.println(s"TopGamesPoller: stored ${unique.size} top games")
@@ -56,20 +54,16 @@ class TopGamesPoller(
 object TopGamesPoller {
 
   def make(
-    client: Client[IO],
-    clientId: String,
-    clientSecret: String,
+    twitchClient: TwitchApiClient,
     settings: AppSettings,
     topGamesRepo: TopGamesRepository,
   ): IO[TopGamesPoller] =
-    for tokenRef <- IO.ref(Option.empty[AppAccessToken])
-    yield new TopGamesPoller(
-      appToken = tokenRef,
-      client = client,
-      clientId = clientId,
-      clientSecret = clientSecret,
-      settings = settings,
-      topGamesRepo = topGamesRepo,
+    IO.pure(
+      new TopGamesPoller(
+        twitchClient = twitchClient,
+        settings = settings,
+        topGamesRepo = topGamesRepo,
+      ),
     )
 
 }

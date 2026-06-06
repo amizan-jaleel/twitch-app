@@ -88,7 +88,7 @@ object AppWiring {
       pendingOAuthStates <- IO.ref(Set.empty[String])
       notificationQueues <- IO.ref(Map.empty[String, (String, Queue[IO, StreamNotification])])
       pushService <- pushServiceIO
-      twitchApi = new TwitchApiClient(
+      twitchApi <- TwitchApiClient.make(
         client = client,
         clientId = config.clientId,
         clientSecret = config.clientSecret,
@@ -130,9 +130,7 @@ object AppWiring {
       ).orNotFound
       corsApp = CORS.policy.withAllowOriginAll(httpApp)
       poller <- StreamPoller.make(
-        client = client,
-        clientId = config.clientId,
-        clientSecret = config.clientSecret,
+        twitchClient = twitchApi,
         followRepo = followRepo,
         ignoredStreamerRepo = ignoredStreamerRepo,
         notificationQueues = notificationQueues,
@@ -142,9 +140,7 @@ object AppWiring {
         tagFilterRepo = tagFilterRepo,
       )
       topGamesPoller <- TopGamesPoller.make(
-        client = client,
-        clientId = config.clientId,
-        clientSecret = config.clientSecret,
+        twitchClient = twitchApi,
         settings = settings,
         topGamesRepo = topGamesRepo,
       )
