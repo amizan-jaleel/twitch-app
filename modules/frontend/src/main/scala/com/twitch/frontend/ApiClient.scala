@@ -3,6 +3,7 @@ package com.twitch.frontend
 import scala.concurrent.duration.*
 
 import cats.effect.*
+import cats.effect.std.{Dispatcher, Queue}
 import fs2.Stream
 import io.circe.parser.decode
 import io.circe.syntax.*
@@ -156,40 +157,22 @@ object ApiClient:
     Stream.resource(sseResource).flatMap(nextEvent => Stream.repeatEval(nextEvent))
 
   private def sseResource: Resource[IO, IO[StreamNotification]] =
-    Resource
-      .make(IO {
-        // Mutable state is safe here — Scala.js is single-threaded
-        var waiting: (Either[Throwable, StreamNotification] => Unit) | Null = null
-        val buffer = scala.collection.mutable.Queue[StreamNotification]()
-
+    for
+      dispatcher <- Dispatcher.sequential[IO]
+      queue <- Resource.eval(Queue.unbounded[IO, Either[Throwable, StreamNotification]])
+      _ <- Resource.make(IO {
         val es = new dom.EventSource("/api/notifications/stream")
         es.addEventListener(
           "stream-live",
           (e: dom.MessageEvent) =>
             decode[StreamNotification](e.data.asInstanceOf[String]).foreach { n =>
-              if (waiting != null) {
-                val cb = waiting
-                waiting = null
-                cb(Right(n))
-              } else {
-                buffer.enqueue(n)
-              }
+              dispatcher.unsafeRunAndForget(queue.offer(Right(n)))
             },
         )
         es.onerror = (_: dom.Event) =>
-          if (waiting != null) {
-            val cb = waiting
-            waiting = null
-            cb(Left(new RuntimeException("SSE connection error")))
-          }
-
-        val nextEvent: IO[StreamNotification] = IO.async_[StreamNotification] { cb =>
-          if (buffer.nonEmpty)
-            cb(Right(buffer.dequeue()))
-          else
-            waiting = cb
-        }
-
-        (es, nextEvent)
-      })(pair => IO(pair._1.close()))
-      .map(_._2)
+          dispatcher.unsafeRunAndForget(
+            queue.offer(Left(new RuntimeException("SSE connection error"))),
+          )
+        es
+      })(es => IO(es.close()))
+    yield queue.take.flatMap(IO.fromEither)
