@@ -233,7 +233,7 @@ Each route file takes only the dependencies it needs:
 - `UserRoutes` needs `SessionManager` + `Database` (for logout)
 - `PreferenceRoutes` needs `SessionManager` + `Database`
 - `SearchRoutes` needs `SessionManager` + `TwitchApi`
-- `AuthRoutes` needs `SessionManager` + `TwitchApi` + `EmailNotifier` + `Database` + `pendingOAuthStates: Ref[IO, Set[String]]` + auth config (`clientId`, `redirectUri`, `secureCookies`). The callback handler does OAuth state validation, code exchange, user lookup, user insert/update, welcome email, and session creation — all of which need explicit dependencies. `SessionManager` owns session lookup/refresh/cookies but not session *creation* or user upsert, which belong to the auth flow.
+- `AuthRoutes` needs `SessionManager` + `TwitchApi` + `EmailNotifier` + `Database` + `OAuthStateTokenService` + auth config (`clientId`, `redirectUri`, `secureCookies`). The callback handler does signed OAuth state validation, code exchange, user lookup, user insert/update, welcome email, and session creation — all of which need explicit dependencies. `SessionManager` owns session lookup/refresh/cookies but not session *creation* or user upsert, which belong to the auth flow.
 - `NotificationRoutes` needs `SessionManager` + `Database` + notification queues
 
 Compose in `TwitchServer` / `AppWiring`:

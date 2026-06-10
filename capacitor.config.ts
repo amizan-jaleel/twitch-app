@@ -17,9 +17,9 @@ const config: CapacitorConfig = {
     // Capacitor native plugins (push notifications) still work because
     // they run in the native layer, not the WebView.
     url: 'https://twitch-app-grn6.onrender.com',
-    cleartext: true,
+    cleartext: false,
     // Keep Twitch OAuth flow inside the WebView instead of opening external browser
-    allowNavigation: ['id.twitch.tv', '*.twitch.tv']
+    allowNavigation: ['id.twitch.tv']
   }
 };
 

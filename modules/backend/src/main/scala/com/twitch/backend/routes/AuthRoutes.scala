@@ -1,7 +1,9 @@
 package com.twitch.backend.routes
 
-import java.time.Instant
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.UUID
+import scala.concurrent.duration.FiniteDuration
 
 import cats.effect.*
 import org.http4s.*
@@ -10,21 +12,43 @@ import org.http4s.dsl.io.*
 import org.http4s.headers.Location
 import org.http4s.implicits.*
 
-import com.twitch.backend.{EmailNotifier, TwitchApi}
+import com.twitch.backend.{EmailNotifier, OAuthStateTokenService, TwitchApi}
 import com.twitch.backend.db.{SessionRepository, UserRepository}
 import com.twitch.core.TwitchUser
 
 class AuthRoutes(
   clientId: String,
   emailService: Option[EmailNotifier],
-  pendingOAuthStates: Ref[IO, Set[String]],
+  oauthStateTokens: OAuthStateTokenService,
   redirectUri: String,
   sessionRepo: SessionRepository,
+  sessionTtl: FiniteDuration,
   twitchApi: TwitchApi,
   userRepo: UserRepository,
 ) {
 
   private val secureCookies = redirectUri.startsWith("https")
+  private val oauthStateCookie = "oauth_state"
+
+  private val expiredOAuthStateCookie = ResponseCookie(
+    oauthStateCookie,
+    "",
+    expires = Some(HttpDate.Epoch),
+    path = Some("/auth"),
+    httpOnly = true,
+    secure = secureCookies,
+    sameSite = Some(SameSite.Lax),
+  )
+
+  private class InvalidOAuthStateException extends RuntimeException("Invalid OAuth state parameter")
+
+  private def urlEncode(value: String): String =
+    URLEncoder.encode(value, StandardCharsets.UTF_8)
+
+  private def validateOAuthState(req: Request[IO], state: String): Boolean = {
+    val cookieState = req.cookies.find(_.name == oauthStateCookie).map(_.content)
+    cookieState.contains(state) && oauthStateTokens.verifyState(state).isRight
+  }
 
   private def sendWelcomeEmailIfNeeded(user: TwitchUser): IO[Unit] =
     (user.email, emailService) match {
@@ -47,21 +71,31 @@ class AuthRoutes(
 
   def routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case GET -> Root / "auth" / "login" =>
-      val state = UUID.randomUUID().toString
-      val authorizeUri =
-        s"https://id.twitch.tv/oauth2/authorize?client_id=$clientId&redirect_uri=$redirectUri&response_type=code&scope=user:read:email&state=$state"
-      pendingOAuthStates.update(_ + state) *>
-        Found(Location(Uri.unsafeFromString(authorizeUri)))
+      oauthStateTokens.createState.flatMap { state =>
+        val authorizeUri =
+          s"https://id.twitch.tv/oauth2/authorize?client_id=${urlEncode(clientId)}&redirect_uri=${urlEncode(redirectUri)}&response_type=code&scope=${urlEncode("user:read:email")}&state=${urlEncode(state)}"
+        Found(Location(Uri.unsafeFromString(authorizeUri))).map(
+          _.addCookie(
+            ResponseCookie(
+              oauthStateCookie,
+              state,
+              path = Some("/auth"),
+              httpOnly = true,
+              secure = secureCookies,
+              sameSite = Some(SameSite.Lax),
+            ),
+          ),
+        )
+      }
 
-    case GET -> Root / "auth" / "callback" :? CodeQueryParamMatcher(code) +& StateQueryParamMatcher(
+    case req @ GET -> Root / "auth" / "callback" :? CodeQueryParamMatcher(
+          code,
+        ) +& StateQueryParamMatcher(
           state,
         ) =>
       val flow = for {
-        pending <- pendingOAuthStates.get
-        _ <- IO.raiseUnless(pending.contains(state))(
-          new RuntimeException("Invalid OAuth state parameter"),
-        )
-        _ <- pendingOAuthStates.update(_ - state)
+        validState <- IO.delay(validateOAuthState(req, state))
+        _ <- IO.raiseUnless(validState)(new InvalidOAuthStateException)
         _ <- IO.println("Received auth callback")
         tokenResponse <- twitchApi.exchangeCode(code, redirectUri)
         _ <- IO.println("Token exchange successful")
@@ -76,14 +110,18 @@ class AuthRoutes(
             userRepo.updateLastLogin(user.id, user.login, user.display_name, user.email) *>
               (if !existing.welcomeEmailSent then sendWelcomeEmailIfNeeded(user) else IO.unit)
         }
+        now <- IO.realTimeInstant
         sessionId = UUID.randomUUID().toString
-        tokenExpiresAt = Some(Instant.now().plusSeconds(tokenResponse.expires_in.toLong))
+        tokenExpiresAt = Some(now.plusSeconds(tokenResponse.expires_in.toLong))
+        sessionExpiresAt = now.plusMillis(sessionTtl.toMillis)
         _ <- sessionRepo.createSession(
           sessionId,
           user,
           tokenResponse.access_token,
           tokenResponse.refresh_token,
           tokenExpiresAt,
+          sessionExpiresAt = sessionExpiresAt,
+          createdAt = now,
         )
         res <- Found(Location(uri"/")).map(
           _.addCookie(
@@ -95,13 +133,17 @@ class AuthRoutes(
               secure = secureCookies,
               sameSite = Some(SameSite.Lax),
             ),
-          ),
+          ).addCookie(expiredOAuthStateCookie),
         )
       } yield res
 
       flow.handleErrorWith { err =>
-        IO.println(s"Auth flow failed: ${err.getMessage}") *>
-          InternalServerError(s"Auth flow failed. Check server logs. Error: ${err.getMessage}")
+        err match {
+          case _: InvalidOAuthStateException => BadRequest("Invalid OAuth state parameter")
+          case _ =>
+            IO.println(s"Auth flow failed: ${err.getMessage}") *>
+              InternalServerError("Auth flow failed. Check server logs.")
+        }
       }
   }
 

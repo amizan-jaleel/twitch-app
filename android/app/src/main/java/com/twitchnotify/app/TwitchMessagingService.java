@@ -15,8 +15,6 @@ import com.google.firebase.messaging.RemoteMessage;
 public class TwitchMessagingService extends FirebaseMessagingService {
 
     private static final String CHANNEL_ID = "stream_alerts";
-    static final String PREFS_NAME = "twitch_push";
-    static final String FCM_TOKEN_KEY = "fcm_token";
 
     @Override
     public void onCreate() {
@@ -33,16 +31,6 @@ public class TwitchMessagingService extends FirebaseMessagingService {
     }
 
     @Override
-    public void onNewToken(String token) {
-        super.onNewToken(token);
-        // Persist so IgnoreStreamerReceiver can authenticate its background request.
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .edit()
-            .putString(FCM_TOKEN_KEY, token)
-            .apply();
-    }
-
-    @Override
     public void onMessageReceived(RemoteMessage message) {
         String title = message.getData().containsKey("title")
             ? message.getData().get("title") : "Stream is live!";
@@ -53,6 +41,8 @@ public class TwitchMessagingService extends FirebaseMessagingService {
             ? message.getData().get("streamerName") : "";
         String streamerId = message.getData().containsKey("streamerId")
             ? message.getData().get("streamerId") : "0";
+        String actionToken = message.getData().containsKey("actionToken")
+            ? message.getData().get("actionToken") : "";
         int notificationId = streamerId.hashCode();
 
         Intent intent;
@@ -74,6 +64,7 @@ public class TwitchMessagingService extends FirebaseMessagingService {
         ignoreIntent.putExtra("streamerId", streamerId);
         ignoreIntent.putExtra("streamerLogin", streamerLogin != null ? streamerLogin : "");
         ignoreIntent.putExtra("streamerName", streamerName);
+        ignoreIntent.putExtra("actionToken", actionToken);
         ignoreIntent.putExtra("notificationId", notificationId);
         PendingIntent ignorePendingIntent = PendingIntent.getBroadcast(
             this, notificationId, ignoreIntent,

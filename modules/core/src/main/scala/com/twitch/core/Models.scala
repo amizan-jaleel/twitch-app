@@ -42,8 +42,7 @@ abstract class PaginatedResponse[A] {
 case class TwitchSearchCategoriesResponse(
   data: List[TwitchCategory],
   pagination: Option[TwitchPagination],
-) extends PaginatedResponse[TwitchCategory]
-    derives Codec.AsObject
+) extends PaginatedResponse[TwitchCategory] derives Codec.AsObject
 
 case class TwitchChannel(
   id: String,
@@ -84,8 +83,7 @@ case class TwitchStream(
 case class TwitchStreamsResponse(
   data: List[TwitchStream],
   pagination: Option[TwitchPagination],
-) extends PaginatedResponse[TwitchStream]
-    derives Codec.AsObject
+) extends PaginatedResponse[TwitchStream] derives Codec.AsObject
 
 case class StreamNotification(
   categoryId: String,
@@ -143,10 +141,7 @@ case class PushUnregisterRequest(
 ) derives Codec.AsObject
 
 case class PushIgnoreStreamerRequest(
-  token: String,
-  streamerId: String,
-  streamerLogin: String,
-  streamerName: String,
+  actionToken: String,
 ) derives Codec.AsObject
 
 case class TopGameIdsResponse(

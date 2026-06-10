@@ -7,3 +7,16 @@ node_modules/
 .git/
 .github/
 .claude/
+.env
+.env.*
+!.env.example
+android/.gradle/
+android/app/build/
+ios/App/Pods/
+ios/App/build/
+ios/App/DerivedData/
+ios/App/App/GoogleService-Info.plist
+firebase/
+scripts/.asc-api-key.env
+test-results/
+pwa-verification.png

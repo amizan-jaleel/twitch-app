@@ -40,4 +40,21 @@ class SessionManagerSpec extends FunSuite {
     assertEquals(SessionManager.needsRefresh(Some(expiresAt), now, skew), false)
   }
 
+  test("isExpired returns false when explicit session expiry is in the future") {
+    val createdAt = now.minusSeconds(3600).getEpochSecond
+    val expiresAt = Some(now.plusSeconds(60).getEpochSecond)
+    assertEquals(SessionManager.isExpired(createdAt, expiresAt, now, 30.days), false)
+  }
+
+  test("isExpired returns true when explicit session expiry has passed") {
+    val createdAt = now.minusSeconds(3600).getEpochSecond
+    val expiresAt = Some(now.minusSeconds(1).getEpochSecond)
+    assertEquals(SessionManager.isExpired(createdAt, expiresAt, now, 30.days), true)
+  }
+
+  test("isExpired falls back to createdAt plus ttl for legacy sessions") {
+    val createdAt = now.minusSeconds(30.days.toSeconds + 1).getEpochSecond
+    assertEquals(SessionManager.isExpired(createdAt, None, now, 30.days), true)
+  }
+
 }

@@ -29,7 +29,7 @@ class PushNotificationServiceSpec extends FunSuite {
 
   test("messagePayload keeps Android payload data-only") {
     val message = PushNotificationService
-      .messagePayload(subscription("android"), notification)
+      .messagePayload(subscription("android"), notification, "signed-action-token")
       .hcursor
       .downField("message")
 
@@ -42,13 +42,17 @@ class PushNotificationServiceSpec extends FunSuite {
       message.downField("data").downField("streamerName").as[String],
       Right("Streamer"),
     )
+    assertEquals(
+      message.downField("data").downField("actionToken").as[String],
+      Right("signed-action-token"),
+    )
     assert(message.downField("notification").focus.isEmpty)
     assert(message.downField("apns").focus.isEmpty)
   }
 
   test("messagePayload adds visible APNs alert payload for iOS") {
     val message = PushNotificationService
-      .messagePayload(subscription("ios"), notification)
+      .messagePayload(subscription("ios"), notification, "signed-action-token")
       .hcursor
       .downField("message")
 
@@ -91,11 +95,15 @@ class PushNotificationServiceSpec extends FunSuite {
       message.downField("data").downField("streamerLogin").as[String],
       Right("streamer_login"),
     )
+    assertEquals(
+      message.downField("data").downField("actionToken").as[String],
+      Right("signed-action-token"),
+    )
   }
 
   test("messagePayload treats iOS platform case-insensitively") {
     val message = PushNotificationService
-      .messagePayload(subscription("IOS"), notification)
+      .messagePayload(subscription("IOS"), notification, "signed-action-token")
       .hcursor
       .downField("message")
 

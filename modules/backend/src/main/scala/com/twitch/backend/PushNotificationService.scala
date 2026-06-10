@@ -23,6 +23,7 @@ class PushNotificationService(
   client: Client[IO],
   parallelSends: Int,
   projectId: String,
+  pushActionTokens: PushActionTokenService,
   pushRepo: PushSubscriptionRepository,
   serviceAccountKey: ServiceAccountKey,
   tokenCache: Ref[IO, Option[(String, Instant)]],
@@ -121,27 +122,31 @@ class PushNotificationService(
   ): IO[SendResult] =
     getAccessToken
       .flatMap { accessToken =>
-        val payload = PushNotificationService.messagePayload(subscription, notification)
+        pushActionTokens.createIgnoreStreamerToken(subscription.userId, notification).flatMap {
+          actionToken =>
+            val payload =
+              PushNotificationService.messagePayload(subscription, notification, actionToken)
 
-        val req = Request[IO](method = Method.POST, uri = fcmUri)
-          .withEntity(payload.noSpaces)
-          .putHeaders(
-            Authorization(Credentials.Token(AuthScheme.Bearer, accessToken)),
-            `Content-Type`(MediaType.application.json),
-          )
+            val req = Request[IO](method = Method.POST, uri = fcmUri)
+              .withEntity(payload.noSpaces)
+              .putHeaders(
+                Authorization(Credentials.Token(AuthScheme.Bearer, accessToken)),
+                `Content-Type`(MediaType.application.json),
+              )
 
-        client.run(req).use { resp =>
-          if resp.status.isSuccess then IO.pure(SendResult.Success)
-          else
-            resp.as[String].flatMap { body =>
-              if resp.status.code == 404 || body.contains("UNREGISTERED") then
-                pushRepo
-                  .deletePushSubscription(subscription.deviceToken)
-                  .as(SendResult.InvalidToken)
+            client.run(req).use { resp =>
+              if resp.status.isSuccess then IO.pure(SendResult.Success)
               else
-                IO.println(
-                  s"FCM error for token ${subscription.deviceToken.take(10)}...: ${resp.status} $body",
-                ).as(SendResult.Failed)
+                resp.as[String].flatMap { body =>
+                  if resp.status.code == 404 || body.contains("UNREGISTERED") then
+                    pushRepo
+                      .deletePushSubscription(subscription.userId, subscription.deviceToken)
+                      .as(SendResult.InvalidToken)
+                  else
+                    IO.println(
+                      s"FCM error for token ${subscription.deviceToken.take(10)}...: ${resp.status} $body",
+                    ).as(SendResult.Failed)
+                }
             }
         }
       }
@@ -177,6 +182,7 @@ object PushNotificationService {
   private[backend] def messagePayload(
     subscription: PushSubscriptionRow,
     notification: StreamNotification,
+    actionToken: String,
   ): Json = {
     val title = s"${notification.streamerName} is live!"
     val body = s"Playing ${notification.categoryName}: ${notification.streamTitle}"
@@ -187,6 +193,7 @@ object PushNotificationService {
       "streamerLogin" -> notification.streamerLogin.asJson,
       "streamerName" -> notification.streamerName.asJson,
       "categoryId" -> notification.categoryId.asJson,
+      "actionToken" -> actionToken.asJson,
     )
 
     val baseMessage = Json.obj(

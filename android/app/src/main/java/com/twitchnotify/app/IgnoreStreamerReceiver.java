@@ -6,8 +6,6 @@ import android.content.Intent;
 
 import androidx.core.app.NotificationManagerCompat;
 
-import com.google.firebase.messaging.FirebaseMessaging;
-
 import org.json.JSONObject;
 
 import java.io.OutputStream;
@@ -18,8 +16,8 @@ import java.net.URL;
  * Handles the "Ignore streamer" notification action. Runs in the background (no UI):
  * dismisses the notification immediately, then tells the backend to ignore the streamer.
  *
- * Native code can't read the WebView session cookie, so the request is authenticated by
- * the device's FCM token, which the backend maps to the user via push_subscriptions.
+ * Native code can't read the WebView session cookie, so the request uses the signed,
+ * short-lived action token delivered in the notification payload.
  */
 public class IgnoreStreamerReceiver extends BroadcastReceiver {
 
@@ -28,47 +26,26 @@ public class IgnoreStreamerReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String streamerId = intent.getStringExtra("streamerId");
-        String streamerLogin = intent.getStringExtra("streamerLogin");
-        String streamerName = intent.getStringExtra("streamerName");
+        String actionToken = intent.getStringExtra("actionToken");
         int notificationId = intent.getIntExtra("notificationId", 0);
 
         // Dismiss the notification immediately for responsive UX.
         NotificationManagerCompat.from(context).cancel(notificationId);
 
-        if (streamerId == null || streamerId.isEmpty()) {
+        if (streamerId == null || streamerId.isEmpty() || actionToken == null || actionToken.isEmpty()) {
             return;
         }
 
         final PendingResult result = goAsync();
-
-        String token = context
-            .getSharedPreferences(TwitchMessagingService.PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(TwitchMessagingService.FCM_TOKEN_KEY, null);
-
-        if (token != null) {
-            postIgnore(token, streamerId, streamerLogin, streamerName, result);
-        } else {
-            // Fall back to fetching the current token from Firebase.
-            FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
-                if (task.isSuccessful() && task.getResult() != null) {
-                    postIgnore(task.getResult(), streamerId, streamerLogin, streamerName, result);
-                } else {
-                    result.finish();
-                }
-            });
-        }
+        postIgnore(actionToken, result);
     }
 
-    private void postIgnore(String token, String streamerId, String streamerLogin,
-                            String streamerName, PendingResult result) {
+    private void postIgnore(String actionToken, PendingResult result) {
         new Thread(() -> {
             HttpURLConnection conn = null;
             try {
                 JSONObject payload = new JSONObject();
-                payload.put("token", token);
-                payload.put("streamerId", streamerId);
-                payload.put("streamerLogin", streamerLogin != null ? streamerLogin : "");
-                payload.put("streamerName", streamerName != null ? streamerName : "");
+                payload.put("actionToken", actionToken);
 
                 URL url = new URL(BACKEND_BASE_URL + "/api/push/ignore-streamer");
                 conn = (HttpURLConnection) url.openConnection();

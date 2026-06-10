@@ -1,5 +1,6 @@
 package com.twitch.frontend
 
+import org.scalajs.dom
 import scala.scalajs.js
 
 object CapacitorPush:
@@ -7,9 +8,8 @@ object CapacitorPush:
   private def capacitor: js.Dynamic = js.Dynamic.global.Capacitor
   private def plugin: js.Dynamic = capacitor.Plugins.PushNotifications
 
-  // typeof is safe for undeclared variables; direct reference throws ReferenceError in strict mode
   private def capacitorExists: Boolean =
-    js.eval("typeof Capacitor !== 'undefined'").asInstanceOf[Boolean]
+    !js.isUndefined(dom.window.asInstanceOf[js.Dynamic].Capacitor)
 
   def isNative: Boolean =
     capacitorExists && capacitor.isNativePlatform().asInstanceOf[Boolean]

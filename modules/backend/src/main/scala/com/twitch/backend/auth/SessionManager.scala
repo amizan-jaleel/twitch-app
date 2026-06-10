@@ -22,25 +22,37 @@ class SessionManager(
   sessionRepo: SessionRepository,
   twitchApi: TwitchApi,
   tokenRefreshSkew: FiniteDuration,
+  sessionTtl: FiniteDuration,
 ) {
+
+  private def isExpired(row: com.twitch.backend.db.SessionRow, now: Instant): Boolean =
+    SessionManager.isExpired(row.createdAt, row.expiresAt, now, sessionTtl)
 
   def getSession(req: Request[IO]): IO[Option[SessionData]] =
     req.cookies.find(_.name == "session_id").map(_.content) match {
       case None => IO.pure(None)
       case Some(sid) =>
-        sessionRepo
-          .getSession(sid)
-          .map(
-            _.map(row =>
-              SessionData(
-                accessToken = row.accessToken,
-                refreshToken = row.refreshToken,
-                sessionId = row.sessionId,
-                tokenExpiresAt = row.tokenExpiresAt,
-                user = row.toUser,
-              ),
-            ),
-          )
+        IO.realTimeInstant.flatMap { now =>
+          sessionRepo
+            .getSession(sid)
+            .flatMap {
+              case Some(row) if isExpired(row, now) =>
+                sessionRepo.deleteSession(row.sessionId).as(None)
+              case Some(row) =>
+                IO.pure(
+                  Some(
+                    SessionData(
+                      accessToken = row.accessToken,
+                      refreshToken = row.refreshToken,
+                      sessionId = row.sessionId,
+                      tokenExpiresAt = row.tokenExpiresAt,
+                      user = row.toUser,
+                    ),
+                  ),
+                )
+              case None => IO.pure(None)
+            }
+        }
     }
 
   def refreshTokenIfNeeded(data: SessionData): IO[SessionData] =
@@ -80,5 +92,15 @@ object SessionManager {
     skew: FiniteDuration,
   ): Boolean =
     tokenExpiresAt.exists(expiresAt => now.getEpochSecond >= expiresAt - skew.toSeconds)
+
+  private[auth] def isExpired(
+    createdAt: Long,
+    expiresAt: Option[Long],
+    now: Instant,
+    fallbackTtl: FiniteDuration,
+  ): Boolean = {
+    val expiry = expiresAt.getOrElse(createdAt + fallbackTtl.toSeconds)
+    now.getEpochSecond >= expiry
+  }
 
 }

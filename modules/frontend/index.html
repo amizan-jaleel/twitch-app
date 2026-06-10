@@ -18,12 +18,6 @@
     <div id="app"></div>
     <!-- This path assumes fastLinkJS output in development -->
     <script src="target/scala-3.6.3/frontend-fastopt/main.js"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js')
-          .then((reg) => console.log('SW registered, scope:', reg.scope))
-          .catch((err) => console.warn('SW registration failed:', err));
-      }
-    </script>
+    <script src="/register-sw.js"></script>
 </body>
 </html>

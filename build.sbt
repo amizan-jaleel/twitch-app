@@ -11,7 +11,7 @@ ThisBuild / organization := "com.twitch"
 
 // ── npm / Tailwind / Scalawind tasks ───────────────────────────────
 
-val npmInstall = taskKey[Unit]("Run npm install if node_modules is missing")
+val npmInstall = taskKey[Unit]("Run npm ci if node_modules is missing")
 val scalawindGen = taskKey[Seq[File]]("Generate scalawind.scala from tailwind config")
 val tailwindBuild = taskKey[File]("Build Tailwind CSS output")
 
@@ -29,10 +29,10 @@ ThisBuild / npmInstall := {
   val log = streams.value.log
   val nodeModules = baseDirectory.value / "node_modules"
   if (!nodeModules.exists()) {
-    log.info("Running npm install...")
-    val exitCode = Process(buildCommand("npm", Seq("install")), baseDirectory.value)
+    log.info("Running npm ci...")
+    val exitCode = Process(buildCommand("npm", Seq("ci")), baseDirectory.value)
       .!(ProcessLogger(s => log.info(s), s => log.error(s)))
-    if (exitCode != 0) sys.error("npm install failed")
+    if (exitCode != 0) sys.error("npm ci failed")
   }
 }
 

@@ -6,6 +6,9 @@ import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private static final String APP_HOST = "twitch-app-grn6.onrender.com";
+    private static final String TWITCH_OAUTH_HOST = "id.twitch.tv";
+
     @Override
     public void onStart() {
         super.onStart();
@@ -16,12 +19,12 @@ public class MainActivity extends BridgeActivity {
                 Uri url = request.getUrl();
                 String scheme = url.getScheme();
 
-                // Only http/https on whitelisted hosts stay in the WebView
-                if ("http".equals(scheme) || "https".equals(scheme)) {
+                // Only exact trusted HTTPS hosts stay in the WebView.
+                if ("https".equals(scheme)) {
                     String host = url.getHost();
                     if (host != null && (
-                        host.endsWith("id.twitch.tv") ||
-                        host.endsWith("onrender.com")
+                        host.equalsIgnoreCase(APP_HOST) ||
+                        host.equalsIgnoreCase(TWITCH_OAUTH_HOST)
                     )) {
                         return false; // load in WebView
                     }

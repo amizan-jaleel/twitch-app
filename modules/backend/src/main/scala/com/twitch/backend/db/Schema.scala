@@ -36,8 +36,12 @@ object Schema {
         access_token VARCHAR NOT NULL,
         refresh_token VARCHAR,
         token_expires_at BIGINT,
-        created_at BIGINT NOT NULL
+        created_at BIGINT NOT NULL,
+        expires_at BIGINT
       )
+    """.update.run
+    val migrateSessionsAddExpiresAt = sql"""
+      ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at BIGINT
     """.update.run
     val createUsers = sql"""
       CREATE TABLE IF NOT EXISTS users (
@@ -93,6 +97,7 @@ object Schema {
       createTagFilters *>
       createIgnoredStreamers *>
       createSessions *>
+      migrateSessionsAddExpiresAt *>
       createUsers *>
       migrateUsersAddLogin *>
       migrateUsersAddDisplayName *>

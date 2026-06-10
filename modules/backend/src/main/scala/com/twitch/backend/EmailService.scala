@@ -57,9 +57,18 @@ class EmailService(
     }
   }
 
-  private def welcomeHtml(displayName: String): String =
+  private def escapeHtml(value: String): String =
+    value
+      .replace("&", "&amp;")
+      .replace("<", "&lt;")
+      .replace(">", "&gt;")
+      .replace("\"", "&quot;")
+      .replace("'", "&#x27;")
+
+  private def welcomeHtml(displayName: String): String = {
+    val safeDisplayName = escapeHtml(displayName)
     s"""<html><body style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-       |<h1 style="color: #9146FF;">Welcome to Twitch Category Tracker, $displayName!</h1>
+       |<h1 style="color: #9146FF;">Welcome to Twitch Category Tracker, $safeDisplayName!</h1>
        |<p>Thanks for signing up! Here's how to get the most out of the app:</p>
        |<ol style="line-height: 1.8;">
        |  <li><strong>Allow notifications</strong> &mdash; make sure you give the site permission to send browser notifications.</li>
@@ -75,5 +84,6 @@ class EmailService(
        |</ul>
        |<p>Happy watching!</p>
        |</body></html>""".stripMargin
+  }
 
 }

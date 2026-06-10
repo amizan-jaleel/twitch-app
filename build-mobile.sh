@@ -12,6 +12,7 @@ cp modules/frontend/index.html www/
 cp -r modules/frontend/dist www/
 cp -r modules/frontend/icons www/
 cp modules/frontend/manifest.json www/
+cp modules/frontend/register-sw.js www/
 cp modules/frontend/sw.js www/
 
 # Copy production JS

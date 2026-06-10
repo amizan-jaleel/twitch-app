@@ -9,10 +9,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     // Notification action/category identifiers shared with the backend APNs payload.
     private static let streamLiveCategory = "STREAM_LIVE"
     private static let ignoreActionId = "IGNORE_STREAMER"
-    private static let fcmTokenKey = "fcm_token"
     // Native action handlers run outside the WebView and can't read the session
-    // cookie, so they call the backend directly at its production origin (matching
-    // the server.url in capacitor.config.ts).
+    // cookie, so they use signed action tokens delivered in push payloads.
     private static let backendBaseUrl = "https://twitch-app-grn6.onrender.com"
 
     var window: UIWindow?
@@ -96,9 +94,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     private func postFcmTokenIfNeeded(_ fcmToken: String) {
         guard lastPostedFcmToken != fcmToken else { return }
         lastPostedFcmToken = fcmToken
-        // Persist so the background notification-action handler can authenticate
-        // its ignore-streamer request even when launched cold.
-        UserDefaults.standard.set(fcmToken, forKey: AppDelegate.fcmTokenKey)
         NotificationCenter.default.post(
             name: .capacitorDidRegisterForRemoteNotifications,
             object: fcmToken
@@ -134,8 +129,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         completionHandler([.banner, .sound])
     }
 
-    // Handle notification taps. "Ignore streamer" calls the backend (authenticated by the
-    // device's FCM token) without foregrounding the app; tapping the body opens the stream.
+    // Handle notification taps. "Ignore streamer" calls the backend with a signed action token
+    // without foregrounding the app; tapping the body opens the stream.
     // AppDelegate owns the UNUserNotificationCenterDelegate (handleApplicationNotifications
     // is disabled in capacitor.config), so this runs reliably — even on a background launch
     // — and the completion handler is held until the network request finishes.
@@ -147,16 +142,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             guard
                 let streamerId = userInfo["streamerId"] as? String,
                 !streamerId.isEmpty,
-                let token = UserDefaults.standard.string(forKey: AppDelegate.fcmTokenKey)
+                let actionToken = userInfo["actionToken"] as? String,
+                !actionToken.isEmpty
             else {
                 completeNotificationAction(completionHandler)
                 return
             }
             ignoreStreamer(
-                token: token,
-                streamerId: streamerId,
-                streamerLogin: userInfo["streamerLogin"] as? String ?? "",
-                streamerName: userInfo["streamerName"] as? String ?? "",
+                actionToken: actionToken,
                 completion: completionHandler
             )
         case UNNotificationDefaultActionIdentifier:
@@ -182,16 +175,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     }
 
-    private func ignoreStreamer(token: String, streamerId: String, streamerLogin: String, streamerName: String, completion: @escaping () -> Void) {
+    private func ignoreStreamer(actionToken: String, completion: @escaping () -> Void) {
         guard let url = URL(string: "\(AppDelegate.backendBaseUrl)/api/push/ignore-streamer") else {
             completeNotificationAction(completion)
             return
         }
         let payload: [String: String] = [
-            "token": token,
-            "streamerId": streamerId,
-            "streamerLogin": streamerLogin,
-            "streamerName": streamerName
+            "actionToken": actionToken
         ]
 
         DispatchQueue.main.async {

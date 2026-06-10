@@ -42,4 +42,17 @@ class ServiceWorkerSpec extends FunSuite {
     )
   }
 
+  test("service worker does not intercept cross-origin resources") {
+    val source = serviceWorkerSource
+
+    assert(
+      source.contains("const CACHE_VERSION = 'v4'"),
+      "cache version should be bumped when changing fetch behavior",
+    )
+    assert(
+      source.contains("if (url.origin !== self.location.origin) return;"),
+      "cross-origin resources should load directly instead of being fetched by the service worker",
+    )
+  }
+
 }

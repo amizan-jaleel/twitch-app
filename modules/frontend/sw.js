@@ -1,9 +1,10 @@
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `twitch-tracker-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
+  '/register-sw.js',
   '/icons/icon.svg'
 ];
 
@@ -71,12 +72,14 @@ self.addEventListener('notificationclick', (event) => {
 
   const data = event.notification.data || {};
 
-  // "Ignore streamer" action: tell the backend to ignore this streamer, then
-  // dismiss. The service worker is same-origin with the backend, so the
-  // session cookie authenticates the request automatically.
   if (event.action === 'ignore') {
-    event.waitUntil(
-      fetch('/api/ignored-streamers/add', {
+    const ignoreRequest = data.actionToken
+      ? fetch('/api/push/ignore-streamer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actionToken: data.actionToken })
+      })
+      : fetch('/api/ignored-streamers/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -85,7 +88,10 @@ self.addEventListener('notificationclick', (event) => {
           streamerLogin: data.streamerLogin,
           streamerName: data.streamerName
         })
-      }).then((response) => {
+      });
+
+    event.waitUntil(
+      ignoreRequest.then((response) => {
         if (!response.ok) throw new Error('ignore failed: ' + response.status);
         // Tell any open page to refresh its ignore list so the UI stays in sync.
         return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
@@ -122,24 +128,14 @@ self.addEventListener('notificationclick', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Never cache SSE streams or API mutations
-  if (url.pathname.startsWith('/api/notifications/stream')) {
-    return;
-  }
+  // Only handle same-origin requests. Cross-origin resources like Twitch CDN
+  // images must load directly via the browser's img-src policy; fetching them
+  // here is governed by connect-src and breaks under a self-only policy.
+  if (url.origin !== self.location.origin) return;
 
-  // Network-first for API calls — show fresh data when online, cached when offline
+  // Never persist private auth/API responses in CacheStorage.
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok && event.request.method === 'GET') {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request))
-    );
+    event.respondWith(fetch(event.request));
     return;
   }
 

@@ -11,48 +11,83 @@ import com.twitch.backend.SqlDialect
 
 class PushSubscriptionRepository(xa: Transactor[IO], dialect: SqlDialect) {
 
-  def savePushSubscription(userId: String, deviceToken: String, platform: String): IO[Unit] = {
+  def savePushSubscription(userId: String, deviceToken: String, platform: String): IO[Unit] =
+    savePushSubscriptionIfUnderLimit(userId, deviceToken, platform, Int.MaxValue).flatMap {
+      case PushSubscriptionSaveResult.Saved => IO.unit
+      case PushSubscriptionSaveResult.LimitReached =>
+        IO.raiseError(new IllegalStateException("Push subscription limit reached"))
+      case PushSubscriptionSaveResult.TokenOwnedByAnotherUser =>
+        IO.raiseError(new IllegalStateException("Push token already belongs to another user"))
+    }
+
+  def savePushSubscriptionIfUnderLimit(
+    userId: String,
+    deviceToken: String,
+    platform: String,
+    maxPushSubscriptions: Int,
+  ): IO[PushSubscriptionSaveResult] = {
     val id = java.util.UUID.randomUUID().toString
     val now = Instant.now().getEpochSecond
     val stmt = dialect match {
       case SqlDialect.Postgres =>
         sql"""
           INSERT INTO push_subscriptions (id, user_id, device_token, platform, created_at)
-          VALUES ($id, $userId, $deviceToken, $platform, $now)
+          SELECT $id, $userId, $deviceToken, $platform, $now
+          WHERE NOT EXISTS (
+            SELECT 1 FROM push_subscriptions WHERE device_token = $deviceToken AND user_id <> $userId
+          ) AND (
+            EXISTS (
+              SELECT 1 FROM push_subscriptions WHERE user_id = $userId AND device_token = $deviceToken
+            ) OR (
+              SELECT COUNT(*) FROM push_subscriptions WHERE user_id = $userId
+            ) < $maxPushSubscriptions
+          )
           ON CONFLICT (user_id, device_token) DO UPDATE SET platform = EXCLUDED.platform
         """
       case SqlDialect.H2 =>
         sql"""
           MERGE INTO push_subscriptions (id, user_id, device_token, platform, created_at)
           KEY(user_id, device_token)
-          VALUES ($id, $userId, $deviceToken, $platform, $now)
+          SELECT $id, $userId, $deviceToken, $platform, $now
+          WHERE NOT EXISTS (
+            SELECT 1 FROM push_subscriptions WHERE device_token = $deviceToken AND user_id <> $userId
+          ) AND (
+            EXISTS (
+              SELECT 1 FROM push_subscriptions WHERE user_id = $userId AND device_token = $deviceToken
+            ) OR (
+              SELECT COUNT(*) FROM push_subscriptions WHERE user_id = $userId
+            ) < $maxPushSubscriptions
+          )
         """
     }
-    // A device represents one current user; reassign the token by removing rows owned by
-    // other users before (re)saving, so getUserIdByToken stays unambiguous.
-    val deleteStaleOwners =
-      sql"DELETE FROM push_subscriptions WHERE device_token = $deviceToken AND user_id <> $userId"
-        .update
-        .run
-    (deleteStaleOwners *> stmt.update.run).transact(xa).void
+    stmt
+      .update
+      .run
+      .transact(xa)
+      .flatMap {
+        case changed if changed > 0 => IO.pure(PushSubscriptionSaveResult.Saved)
+        case _ =>
+          isDeviceTokenOwnedByAnotherUser(userId, deviceToken).map {
+            case true => PushSubscriptionSaveResult.TokenOwnedByAnotherUser
+            case false => PushSubscriptionSaveResult.LimitReached
+          }
+      }
   }
 
-  def deletePushSubscription(deviceToken: String): IO[Unit] =
-    sql"DELETE FROM push_subscriptions WHERE device_token = $deviceToken"
+  def deletePushSubscription(userId: String, deviceToken: String): IO[Unit] =
+    sql"DELETE FROM push_subscriptions WHERE user_id = $userId AND device_token = $deviceToken"
       .update
       .run
       .transact(xa)
       .void
 
-  // A device token maps to a single current user. Order + limit defensively in case a
-  // stale row from a previous owner lingers (e.g. account switch without unregister).
-  def getUserIdByToken(deviceToken: String): IO[Option[String]] =
-    sql"""SELECT user_id FROM push_subscriptions
-          WHERE device_token = $deviceToken
-          ORDER BY created_at DESC
+  private def isDeviceTokenOwnedByAnotherUser(userId: String, deviceToken: String): IO[Boolean] =
+    sql"""SELECT 1 FROM push_subscriptions
+          WHERE device_token = $deviceToken AND user_id <> $userId
           LIMIT 1"""
-      .query[String]
+      .query[Int]
       .option
+      .map(_.isDefined)
       .transact(xa)
 
   def getPushSubscriptionsForUsers(userIds: Set[String]): IO[List[PushSubscriptionRow]] =
@@ -74,3 +109,7 @@ case class PushSubscriptionRow(
   platform: String,
   createdAt: Long,
 )
+
+enum PushSubscriptionSaveResult {
+  case Saved, LimitReached, TokenOwnedByAnotherUser
+}

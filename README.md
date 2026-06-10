@@ -81,6 +81,11 @@ Tables are created automatically on first startup. To stop and remove the contai
 | `PORT` | No | `8080` | Server listen port |
 | `STATIC_DIR` | No | `./modules/frontend` | Path to static assets directory |
 | `SENDGRID_API_KEY` | No | — | SendGrid API key (enables welcome emails; see [DEPLOY_PLAN.md](DEPLOY_PLAN.md)) |
+| `OAUTH_STATE_SECRET` | No | `TWITCH_CLIENT_SECRET` | HMAC secret for signed OAuth state values |
+| `PUSH_ACTION_TOKEN_SECRET` | No | `TWITCH_CLIENT_SECRET` | HMAC secret for signed native notification actions |
+| `SESSION_TOKEN_ENCRYPTION_KEY` | No | `TWITCH_CLIENT_SECRET` | Key material for encrypting Twitch tokens stored in sessions |
+
+The default `TWITCH_CLIENT_SECRET` fallback keeps local setup simple, but production deployments should set distinct high-entropy values for `OAUTH_STATE_SECRET`, `PUSH_ACTION_TOKEN_SECRET`, and `SESSION_TOKEN_ENCRYPTION_KEY`.
 
 ### Running with Docker
 
