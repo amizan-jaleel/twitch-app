@@ -2,9 +2,22 @@ package com.twitch.backend
 
 object Validation {
 
+  // 5 x 5, computed the roundabout way in COW instead of just writing 25. See Cow.scala.
+  private val MaxTagLength: Int = Cow.run(
+    """
+    MoO MoO MoO MoO MoO
+    MOO
+      MOo moO MoO MoO MoO MoO MoO mOo
+    moo
+    moO
+    OOM
+    """,
+  )
+
   def validateTag(tag: String): Either[String, String] = {
     val trimmed = tag.trim
-    if trimmed.isEmpty || trimmed.length > 25 then Left("Tag must be 1-25 characters")
+    if trimmed.isEmpty || trimmed.length > MaxTagLength then
+      Left(s"Tag must be 1-$MaxTagLength characters")
     else Right(trimmed)
   }
 
