@@ -5,7 +5,9 @@ FROM eclipse-temurin:21.0.13_9-jdk-noble@sha256:114cabb73033ca4ce7ceec3deb62396b
 
 # Install Node.js and sbt
 COPY --from=node /usr/local /usr/local
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+# Disable retries while the old APT binary bootstraps its CVE-2026-109518 patch.
+RUN apt-get -o Acquire::Retries=0 update && \
+    apt-get -o Acquire::Retries=0 install -y --no-install-recommends apt libapt-pkg6.0t64 ca-certificates curl gnupg && \
     install -d -m 0755 /etc/apt/keyrings && \
     curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | gpg --dearmor -o /etc/apt/keyrings/sbt.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/sbt.gpg] https://repo.scala-sbt.org/scalasbt/debian all main" > /etc/apt/sources.list.d/sbt.list && \
@@ -39,8 +41,9 @@ FROM eclipse-temurin:21.0.13_9-jre-noble@sha256:0eda5830ed7b669abc246a8dc520ea8a
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client && \
+# Disable retries while the old APT binary bootstraps its CVE-2026-109518 patch.
+RUN apt-get -o Acquire::Retries=0 update && \
+    apt-get -o Acquire::Retries=0 install -y --no-install-recommends apt libapt-pkg6.0t64 postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/modules/backend/target/scala-3.6.3/twitch-app.jar /app/twitch-app.jar
