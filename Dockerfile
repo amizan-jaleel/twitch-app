@@ -1,13 +1,17 @@
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS node
+
 # ── Build stage ─────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jdk AS build
+FROM eclipse-temurin:21.0.13_9-jdk-noble@sha256:114cabb73033ca4ce7ceec3deb62396bc1b716282bae051ed3c1d82e38fcab2d AS build
 
 # Install Node.js and sbt
-RUN apt-get update && apt-get install -y curl gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | tee /etc/apt/sources.list.d/sbt.list && \
-    curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | gpg --dearmor -o /etc/apt/trusted.gpg.d/sbt.gpg && \
-    apt-get update && apt-get install -y sbt && \
+COPY --from=node /usr/local /usr/local
+# Disable retries while the old APT binary bootstraps its CVE-2026-109518 patch.
+RUN apt-get -o Acquire::Retries=0 update && \
+    apt-get -o Acquire::Retries=0 install -y --no-install-recommends apt libapt-pkg6.0t64 ca-certificates curl gnupg && \
+    install -d -m 0755 /etc/apt/keyrings && \
+    curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | gpg --dearmor -o /etc/apt/keyrings/sbt.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/sbt.gpg] https://repo.scala-sbt.org/scalasbt/debian all main" > /etc/apt/sources.list.d/sbt.list && \
+    apt-get update && apt-get install -y --no-install-recommends sbt && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -16,7 +20,8 @@ WORKDIR /app
 COPY project/build.properties project/plugins.sbt project/
 COPY build.sbt .
 COPY package.json package-lock.json ./
-RUN sbt update && npm install
+COPY plugins/capacitor-firebase-messaging-ios/package.json plugins/capacitor-firebase-messaging-ios/package.json
+RUN sbt update && npm ci
 
 # Copy source and build everything
 COPY . .
@@ -32,12 +37,13 @@ RUN mkdir -p /app/static/icons && \
     sed -e 's|target/scala-3.6.3/frontend-fastopt/main.js|main.js|' -e 's|dist/output.css|output.css|' modules/frontend/index.html > /app/static/index.html
 
 # ── Run stage ──────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21.0.13_9-jre-noble@sha256:0eda5830ed7b669abc246a8dc520ea8a23cab06f9a8d4b6964109e2f2394e46f
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client && \
+# Disable retries while the old APT binary bootstraps its CVE-2026-109518 patch.
+RUN apt-get -o Acquire::Retries=0 update && \
+    apt-get -o Acquire::Retries=0 install -y --no-install-recommends apt libapt-pkg6.0t64 postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/modules/backend/target/scala-3.6.3/twitch-app.jar /app/twitch-app.jar

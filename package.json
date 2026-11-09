@@ -20,16 +20,21 @@
   },
   "homepage": "https://github.com/ajaleel-tt/twitch-app#readme",
   "devDependencies": {
-    "scalawind": "1.0.3",
+    "scalawind": "1.0.4",
     "tailwindcss": "3.4.19",
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "@capacitor/android": "^8.3.0",
-    "@capacitor/cli": "^8.3.0",
-    "@capacitor/core": "^8.3.0",
-    "@capacitor/ios": "^8.3.0",
+    "@capacitor/android": "8.6.0",
+    "@capacitor/cli": "8.6.0",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/ios": "8.6.0",
     "@capacitor/push-notifications": "^8.0.3",
     "capacitor-firebase-messaging-ios": "file:plugins/capacitor-firebase-messaging-ios"
+  },
+  "overrides": {
+    "scalawind": {
+      "zod": "4.6.7"
+    }
   }
 }
