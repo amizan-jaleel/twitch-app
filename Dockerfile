@@ -44,7 +44,8 @@ WORKDIR /app
 # Disable retries while the old APT binary bootstraps its CVE-2026-109518 patch.
 RUN apt-get -o Acquire::Retries=0 update && \
     apt-get -o Acquire::Retries=0 install -y --no-install-recommends apt libapt-pkg6.0t64 postgresql-client && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    chown ubuntu:ubuntu /app
 
 COPY --from=build /app/modules/backend/target/scala-3.6.3/twitch-app.jar /app/twitch-app.jar
 COPY --from=build /app/static /app/static
@@ -54,4 +55,10 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["java", "-jar", "/app/twitch-app.jar"]
+# App files stay root-owned and read-only; /app itself is writable so the
+# local H2 fallback can create its database file when DATABASE_URL is unset.
+USER ubuntu
+
+# Exit on heap exhaustion so the platform restarts the process instead of
+# leaving it up in a broken state.
+CMD ["java", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/twitch-app.jar"]

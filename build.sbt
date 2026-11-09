@@ -159,6 +159,9 @@ lazy val backend = project
     assembly / assemblyJarName := "twitch-app.jar",
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "services", _*) => MergeStrategy.concat
+      // Keep Maven metadata so image scanners can identify the Java libraries that
+      // ship it (logback, HikariCP, slf4j). Scala libraries don't include it.
+      case PathList("META-INF", "maven", _*) => MergeStrategy.first
       case PathList("META-INF", _*) => MergeStrategy.discard
       case "module-info.class" => MergeStrategy.discard
       case x => MergeStrategy.first
