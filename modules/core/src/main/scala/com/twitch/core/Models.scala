@@ -142,6 +142,13 @@ case class PushUnregisterRequest(
   token: String,
 ) derives Codec.AsObject
 
+case class PushIgnoreStreamerRequest(
+  token: String,
+  streamerId: String,
+  streamerLogin: String,
+  streamerName: String,
+) derives Codec.AsObject
+
 case class TopGameIdsResponse(
   gameIds: Set[String],
 ) derives Codec.AsObject

@@ -28,7 +28,13 @@ class PushSubscriptionRepository(xa: Transactor[IO], dialect: SqlDialect) {
           VALUES ($id, $userId, $deviceToken, $platform, $now)
         """
     }
-    stmt.update.run.transact(xa).void
+    // A device represents one current user; reassign the token by removing rows owned by
+    // other users before (re)saving, so getUserIdByToken stays unambiguous.
+    val deleteStaleOwners =
+      sql"DELETE FROM push_subscriptions WHERE device_token = $deviceToken AND user_id <> $userId"
+        .update
+        .run
+    (deleteStaleOwners *> stmt.update.run).transact(xa).void
   }
 
   def deletePushSubscription(deviceToken: String): IO[Unit] =
@@ -37,6 +43,17 @@ class PushSubscriptionRepository(xa: Transactor[IO], dialect: SqlDialect) {
       .run
       .transact(xa)
       .void
+
+  // A device token maps to a single current user. Order + limit defensively in case a
+  // stale row from a previous owner lingers (e.g. account switch without unregister).
+  def getUserIdByToken(deviceToken: String): IO[Option[String]] =
+    sql"""SELECT user_id FROM push_subscriptions
+          WHERE device_token = $deviceToken
+          ORDER BY created_at DESC
+          LIMIT 1"""
+      .query[String]
+      .option
+      .transact(xa)
 
   def getPushSubscriptionsForUsers(userIds: Set[String]): IO[List[PushSubscriptionRow]] =
     if userIds.isEmpty then IO.pure(Nil)

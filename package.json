@@ -29,6 +29,7 @@
     "@capacitor/cli": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "@capacitor/ios": "^8.3.0",
-    "@capacitor/push-notifications": "^8.0.3"
+    "@capacitor/push-notifications": "^8.0.3",
+    "capacitor-firebase-messaging-ios": "file:plugins/capacitor-firebase-messaging-ios"
   }
 }

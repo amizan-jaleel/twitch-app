@@ -1,9 +1,8 @@
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `twitch-tracker-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   '/',
-  '/dist/output.css',
   '/manifest.json',
   '/icons/icon.svg'
 ];
@@ -12,8 +11,17 @@ const PRECACHE_URLS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting())
+      .then((cache) =>
+        Promise.allSettled(PRECACHE_URLS.map((url) => cache.add(url)))
+      )
+      .then((results) => {
+        results.forEach((result, i) => {
+          if (result.status === 'rejected') {
+            console.warn('SW precache skipped:', PRECACHE_URLS[i], result.reason);
+          }
+        });
+        return self.skipWaiting();
+      })
   );
 });
 
@@ -50,17 +58,52 @@ self.addEventListener('push', (event) => {
     badge: '/icons/icon.svg',
     data: data,
     tag: data.streamerId || 'twitch-notification',
-    renotify: true
+    renotify: true,
+    actions: [{ action: 'ignore', title: 'Ignore streamer' }]
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Notification click: open the stream in the Twitch app via deep link
+// Notification click: handle the "Ignore streamer" action, or open the stream.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const data = event.notification.data || {};
+
+  // "Ignore streamer" action: tell the backend to ignore this streamer, then
+  // dismiss. The service worker is same-origin with the backend, so the
+  // session cookie authenticates the request automatically.
+  if (event.action === 'ignore') {
+    event.waitUntil(
+      fetch('/api/ignored-streamers/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          streamerId: data.streamerId,
+          streamerLogin: data.streamerLogin,
+          streamerName: data.streamerName
+        })
+      }).then((response) => {
+        if (!response.ok) throw new Error('ignore failed: ' + response.status);
+        // Tell any open page to refresh its ignore list so the UI stays in sync.
+        return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+          windows.forEach((w) =>
+            w.postMessage({ type: 'streamer-ignored', streamerId: data.streamerId })
+          );
+        });
+      }).catch(() =>
+        // Surface failures (e.g. an expired session) instead of dismissing silently.
+        self.registration.showNotification("Couldn't ignore streamer", {
+          body: 'Open the app and try again.',
+          icon: '/icons/icon.svg'
+        })
+      )
+    );
+    return;
+  }
+
   const streamer = data.streamerLogin;
 
   if (!streamer) {
@@ -68,13 +111,11 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  // Use Twitch deep link to open the native app directly
-  const deepLink = `twitch://stream/${streamer}`;
-  const fallbackUrl = `https://twitch.tv/${streamer}`;
-
-  event.waitUntil(
-    clients.openWindow(deepLink).catch(() => clients.openWindow(fallbackUrl))
-  );
+  // Open the stream on twitch.tv. In the browser the https URL works on desktop and
+  // mobile; twitch:// would open a blank page when no Twitch protocol handler is
+  // registered (e.g. desktop without the Twitch app). Native iOS/Android handle their
+  // own notification taps and deep-link to the Twitch app separately.
+  event.waitUntil(clients.openWindow(`https://twitch.tv/${streamer}`));
 });
 
 // Fetch: route requests to cache or network

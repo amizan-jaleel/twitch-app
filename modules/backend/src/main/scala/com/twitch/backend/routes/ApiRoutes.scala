@@ -25,6 +25,7 @@ import com.twitch.core.{
   FollowRequest,
   FollowedCategoriesResponse,
   IgnoredStreamersResponse,
+  PushIgnoreStreamerRequest,
   PushRegisterRequest,
   PushUnregisterRequest,
   RemoveIgnoredStreamerRequest,
@@ -191,6 +192,27 @@ class ApiRoutes(
       withSession(req) { _ =>
         req.as[PushUnregisterRequest].flatMap { body =>
           pushRepo.deletePushSubscription(body.token) *> Ok("Unregistered")
+        }
+      }
+
+    // Authenticated by the device push token rather than the session cookie, so that
+    // native notification action handlers (which run outside the WebView and can't read
+    // the session_id cookie) can ignore a streamer in the background.
+    case req @ POST -> Root / "push" / "ignore-streamer" =>
+      req.as[PushIgnoreStreamerRequest].flatMap { body =>
+        Validation.validateNonEmpty(body.streamerId, "streamerId") match {
+          case Right(_) =>
+            pushRepo.getUserIdByToken(body.token).flatMap {
+              case Some(userId) =>
+                ignoredStreamerRepo.addIgnoredStreamer(
+                  userId = userId,
+                  streamerId = body.streamerId,
+                  streamerLogin = body.streamerLogin,
+                  streamerName = body.streamerName,
+                ) *> Ok("Streamer ignored")
+              case None => Forbidden("Unknown device token")
+            }
+          case Left(err) => BadRequest(err)
         }
       }
 

@@ -157,6 +157,8 @@ npx cap sync ios
 npx cap open ios
 ```
 
+In a fresh clone, run `./build-mobile.sh` before opening Xcode or pressing Run. The Xcode project references generated Capacitor resources (`App/public`, `App/capacitor.config.json`, and `App/config.xml`) that are intentionally ignored and refreshed by the build script.
+
 In Xcode: select a simulator or physical device from the toolbar dropdown and press Cmd+R to build and run.
 
 **Testing on a physical iPhone:**
@@ -165,11 +167,37 @@ In Xcode: select a simulator or physical device from the toolbar dropdown and pr
 3. In Xcode: Settings > Accounts > sign in with your Apple ID and select your development team
 4. Select your phone from the device dropdown, then Cmd+R
 
-**Push notifications:** The iOS Simulator cannot receive push notifications — a physical device is required.
+**Push notifications:** iOS 16+ simulators on macOS 13+ with Apple silicon or a T2 chip can receive APNs sandbox notifications. A physical iPhone is still required before trusting TestFlight/App Store production delivery.
 
 **APNs setup (required for iOS push):**
 1. In [Apple Developer](https://developer.apple.com/account/resources/authkeys/list) > Keys > create a new key with APNs enabled, download the `.p8` file
 2. In [Firebase Console](https://console.firebase.google.com) > Project Settings > Cloud Messaging > Apple app configuration > upload the `.p8` key with your Key ID and Team ID
+3. In Apple Developer > Certificates, Identifiers & Profiles > Identifiers, confirm the App ID `com.twitchnotify.app` has Push Notifications enabled
+4. Add the iOS app to Firebase with bundle ID `com.twitchnotify.app`
+5. Download the Firebase `GoogleService-Info.plist` and place it at `ios/App/App/GoogleService-Info.plist`
+6. Do not commit the real plist. `ios/App/App/GoogleService-Info.plist.example` documents the expected file shape, and the Xcode target copies the real local plist into the app bundle when it is present.
+7. Build and run on a physical iPhone or TestFlight build, allow notifications, then confirm `/api/push/register` receives an FCM registration token for platform `ios`.
+
+**Uploading to TestFlight:**
+
+Use the one-shot script — it runs the frontend build, archives, signs, verifies, and (optionally) uploads:
+
+```bash
+scripts/build-ios-testflight.sh            # build + verify locally
+scripts/build-ios-testflight.sh --upload   # build + verify + upload to TestFlight
+```
+
+It auto-increments the build number (tracked in `ios/build-number.txt`) and refuses to upload unless `scripts/verify-ios-ipa.sh` confirms the IPA reports `aps-environment: production` and a bundled `GoogleService-Info.plist`. Prerequisite: `ios/App/App/GoogleService-Info.plist` present locally.
+
+For auth, configure an App Store Connect API key: copy `scripts/.asc-api-key.env.example` to `scripts/.asc-api-key.env` (gitignored) and fill in the key. Build + verify also works with just the Apple ID signed into Xcode (Settings > Accounts), but `--upload` **requires** the API key — it uploads the exact IPA that was verified (via `altool`) rather than re-exporting, so the entitlement gate covers the shipped bytes.
+
+Why a script instead of "Archive in Xcode"? Three non-obvious traps it handles for you:
+
+- **Homebrew `rsync` breaks the export.** Xcode's IPA packaging calls `/usr/bin/rsync -E`, but a Homebrew `rsync` earlier on `PATH` rejects Apple's `--extended-attributes` and fails with "Copy failed". The script forces `/usr/bin` first.
+- **A signed archive can't be produced here.** Automatic signing wants an iOS *Development* profile (needs a registered device — the team has none), ad-hoc signing is blocked on the current SDK, and the Distribution cert is cloud-managed (no local private key). An App Store Connect API key does **not** change this (the archive still demands a Development profile). So the script archives **unsigned** and lets `exportArchive` do the real (cloud) Distribution signing.
+- **The unsigned archive loses `aps-environment`.** An unsigned archive carries no entitlements, so the export re-derives them from the provisioning profile — which omits `aps-environment`, silently shipping a build with **no push**. The script first `codesign`-embeds `ios/appstore-entitlements.plist`, which the export then preserves.
+
+**iOS push architecture:** `AppDelegate.swift` configures Firebase, maps the APNs device token into Firebase Messaging, then forwards the Firebase Messaging registration token through Capacitor's push registration event. The backend sends iOS subscriptions as visible FCM/APNs alert pushes with `apns-push-type: alert` and `apns-priority: 10`, while Android keeps the existing data-only payload path. Verify foreground, background, and terminated delivery on a real iPhone before relying on production notifications.
 
 ### Tech Stack
 

@@ -9,6 +9,14 @@ on:
       - 'project/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'capacitor.config.*'
+      - 'build-mobile.sh'
+      - 'ios/**'
+      - '**/*.swift'
+      - '**/*.xcodeproj/**'
+      - '**/*.xcconfig'
+      - '**/Package.swift'
+      - '**/Package.resolved'
       - 'Dockerfile'
       - '.dockerignore'
       - '.github/workflows/**'
@@ -21,6 +29,14 @@ on:
       - 'project/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'capacitor.config.*'
+      - 'build-mobile.sh'
+      - 'ios/**'
+      - '**/*.swift'
+      - '**/*.xcodeproj/**'
+      - '**/*.xcconfig'
+      - '**/Package.swift'
+      - '**/Package.resolved'
       - 'Dockerfile'
       - '.dockerignore'
       - '.github/workflows/**'
@@ -49,7 +65,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install npm dependencies
@@ -73,6 +89,103 @@ jobs:
 
       - name: Run tests
         run: sbt test
+
+  ios-build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Cache sbt
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/coursier
+          key: ${{ runner.os }}-sbt-${{ hashFiles('build.sbt', 'project/plugins.sbt', 'project/build.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-sbt-
+
+      - name: Build Capacitor app
+        run: ./build-mobile.sh
+
+      - name: Verify Xcode project and shared schemes
+        run: xcodebuild -list -project ios/App/App.xcodeproj
+
+      - name: Select iOS simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          simulator_udid="$(python3 - <<'PY'
+          import json
+          import subprocess
+
+          devices_by_runtime = json.loads(
+              subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"])
+          )["devices"]
+
+          fallback = None
+          for runtime, devices in devices_by_runtime.items():
+              if ".iOS-" not in runtime:
+                  continue
+              for device in devices:
+                  if not device.get("isAvailable"):
+                      continue
+                  fallback = fallback or device
+                  device_type = device.get("deviceTypeIdentifier", "")
+                  if ".iPhone-" in device_type or device.get("name", "").startswith("iPhone"):
+                      print(device["udid"])
+                      raise SystemExit(0)
+
+          if fallback:
+              print(fallback["udid"])
+              raise SystemExit(0)
+
+          raise SystemExit(1)
+          PY
+          )"
+          if [ -z "$simulator_udid" ]; then
+            echo "No available iOS simulator found" >&2
+            exit 1
+          fi
+          echo "destination=platform=iOS Simulator,id=${simulator_udid}" >> "$GITHUB_OUTPUT"
+
+      - name: Build iOS app (Debug)
+        run: |
+          xcodebuild -quiet \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination "${{ steps.simulator.outputs.destination }}" \
+            build
+
+      - name: Build iOS app (Release)
+        run: |
+          xcodebuild -quiet \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination "${{ steps.simulator.outputs.destination }}" \
+            build
 
   docker-build-and-e2e:
     runs-on: ubuntu-latest
@@ -111,7 +224,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Playwright
         run: |

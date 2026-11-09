@@ -5,6 +5,7 @@ import scala.scalajs.js
 import calico.*
 import calico.html.io.{*, given}
 import cats.effect.*
+import cats.effect.unsafe.implicits.global
 import cats.syntax.all.*
 import fs2.concurrent.*
 import fs2.dom.*
@@ -40,6 +41,7 @@ object Main extends IOWebApp:
       ).parTupled.toResource
       _ <- startNotificationStream(state).background
       _ <- initPushNotifications(state).background
+      _ <- syncIgnoredFromBackground(state).toResource
       app <- appView(state)
     yield app
 
@@ -52,17 +54,62 @@ object Main extends IOWebApp:
   private def fireBrowserNotification(n: StreamNotification): IO[Unit] =
     IO {
       if dom.Notification.permission == "granted" then
-        val notification = new dom.Notification(
-          s"${n.streamerName} is live playing ${n.categoryName}!",
-          new dom.NotificationOptions {
-            body = s"${n.categoryName}: ${n.streamTitle}"
-            icon = n.thumbnailUrl
-          },
-        )
-        notification.onclick = (_: dom.Event) => {
-          val _ = dom.window.open(s"https://twitch.tv/${n.streamerLogin}", "_blank")
-          notification.close()
-        }
+        val title = s"${n.streamerName} is live playing ${n.categoryName}!"
+        // Fire through the service worker's showNotification so the notification can carry
+        // an "Ignore streamer" action button — the plain Notification constructor ignores
+        // `actions`. The SW's notificationclick handler performs the ignore / open-stream.
+        // Buttons render where the platform supports them (e.g. Android Chrome); macOS
+        // Chrome shows the notification but not the buttons. Browsers without a service
+        // worker fall back to a basic (button-less) notification.
+        val sw = dom.window.navigator.asInstanceOf[js.Dynamic].serviceWorker
+        if js.isUndefined(sw) || sw == null then fallbackBrowserNotification(n, title)
+        else
+          var shown = false
+          val showFallback: () => Unit = () =>
+            if !shown then
+              shown = true
+              fallbackBrowserNotification(n, title)
+
+          val options = js.Dynamic.literal(
+            body = s"${n.categoryName}: ${n.streamTitle}",
+            icon = n.thumbnailUrl,
+            tag = n.streamerId,
+            data = js.Dynamic.literal(
+              streamerId = n.streamerId,
+              streamerLogin = n.streamerLogin,
+              streamerName = n.streamerName,
+            ),
+            actions = js.Array(js.Dynamic.literal(action = "ignore", title = "Ignore streamer")),
+          )
+          val fallbackTimeout =
+            dom.window.setTimeout(() => showFallback(), 2_000)
+          val _ = sw
+            .ready
+            .asInstanceOf[js.Promise[js.Dynamic]]
+            .`then`[js.Any](
+              ((reg: js.Dynamic) =>
+                if !shown then
+                  shown = true
+                  dom.window.clearTimeout(fallbackTimeout)
+                  reg.showNotification(title, options)
+                else ()
+              ): js.Function1[js.Dynamic, js.Any],
+            )
+    }
+
+  // Fallback for browsers without a service worker: a basic notification. The Notification
+  // constructor doesn't support action buttons, so there's no "Ignore streamer" here.
+  private def fallbackBrowserNotification(n: StreamNotification, title: String): Unit =
+    val notification = new dom.Notification(
+      title,
+      new dom.NotificationOptions {
+        body = s"${n.categoryName}: ${n.streamTitle}"
+        icon = n.thumbnailUrl
+      },
+    )
+    notification.onclick = (_: dom.Event) => {
+      val _ = dom.window.open(s"https://twitch.tv/${n.streamerLogin}", "_blank")
+      notification.close()
     }
 
   private def startNotificationStream(state: SignallingRef[IO, Model]): IO[Unit] =
@@ -104,11 +151,13 @@ object Main extends IOWebApp:
         .filter(_.user.isDefined)
         .take(1)
         .evalMap { _ =>
-          val setup = for
-            // Request notification permission from the OS
+          // Request notification permission, then register for FCM and send the token to
+          // the backend. Notification display and taps are handled natively (iOS
+          // AppDelegate, Android service) — handleApplicationNotifications is disabled, so
+          // there are no JS notification listeners here.
+          for
             perm <- IO.fromPromise(IO(CapacitorPush.requestPermissions()))
             _ <- IO.whenA(perm.receive == "granted") {
-              // Set up the registration callback before calling register()
               IO.async_[String] { cb =>
                 val _ = CapacitorPush.onRegistration(token => cb(Right(token.value)))
                 val _ = CapacitorPush.onRegistrationError { err =>
@@ -123,34 +172,50 @@ object Main extends IOWebApp:
               }
             }
           yield ()
-
-          // Set up handler for notifications received while app is in foreground
-          val foregroundHandler = IO {
-            CapacitorPush.onPushNotificationReceived { notification =>
-              // Foreground notifications are already shown by SSE stream,
-              // but log for debugging
-              dom.console.log(s"Push received in foreground: ${notification.title}")
-            }
-          }
-
-          // Set up handler for when user taps a notification
-          val tapHandler = IO {
-            CapacitorPush.onPushNotificationActionPerformed { action =>
-              val data = action.notification.data
-              if !js.isUndefined(data) then
-                val dynData = data.asInstanceOf[js.Dynamic]
-                val login = dynData.selectDynamic("streamerLogin")
-                if !js.isUndefined(login) then
-                  val streamer = login.asInstanceOf[String]
-                  val url = s"twitch://stream/$streamer"
-                  val _ = dom.window.location.assign(url)
-            }
-          }
-
-          setup *> foregroundHandler *> tapHandler
         }
         .compile
         .drain
+
+  /** Keep the in-app ignore list in sync when a streamer is ignored from a notification
+    * action — that runs in the service worker, outside the page. Refresh whenever the tab
+    * becomes visible again (the common case: the user returns to the tab after ignoring),
+    * and also on a direct service-worker message (page already open/visible).
+    */
+  private def syncIgnoredFromBackground(state: SignallingRef[IO, Model]): IO[Unit] =
+    IO {
+      val refresh: () => Unit = () =>
+        ApiClient
+          .fetchIgnoredStreamers
+          .flatMap(streamers =>
+            state.update(m =>
+              m.copy(ignoredStreamers = m.ignoredStreamers.copy(streamers = streamers)),
+            ),
+          )
+          .unsafeRunAndForget()
+
+      // Tab became visible again (e.g. switching back after tapping "Ignore streamer").
+      val _ = dom.document.addEventListener(
+        "visibilitychange",
+        { (_: dom.Event) =>
+          if dom.document.asInstanceOf[js.Dynamic].visibilityState.asInstanceOf[String] == "visible"
+          then refresh()
+        }: js.Function1[dom.Event, Unit],
+      )
+
+      // Service worker reported an ignore while a page is open/visible.
+      val sw = dom.window.navigator.asInstanceOf[js.Dynamic].serviceWorker
+      if !js.isUndefined(sw) && sw != null then
+        val _ = sw.addEventListener(
+          "message",
+          { (event: js.Dynamic) =>
+            val data = event.data
+            val isIgnored =
+              !js.isUndefined(data) && data != null &&
+                data.selectDynamic("type").asInstanceOf[String] == "streamer-ignored"
+            if isIgnored then refresh()
+          }: js.Function1[js.Dynamic, Unit],
+        )
+    }
 
   private def appView(state: SignallingRef[IO, Model]): Resource[IO, HtmlDivElement[IO]] =
     div(

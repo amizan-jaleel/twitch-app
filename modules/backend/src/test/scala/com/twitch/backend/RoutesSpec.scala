@@ -478,6 +478,67 @@ class RoutesSpec extends CatsEffectSuite {
     }
   }
 
+  // ── Push: ignore-streamer (token-authenticated) ─────────────────────
+
+  test("POST /push/ignore-streamer ignores the streamer for the token's user") {
+    for {
+      sid <- createSession
+      _ <- apiApp.run(
+        withSession(
+          Request[IO](Method.POST, uri"/push/register")
+            .withEntity(PushRegisterRequest(token = "device-token-1", platform = "ios")),
+          sid,
+        ),
+      )
+      ignoreResp <- apiApp.run(
+        Request[IO](Method.POST, uri"/push/ignore-streamer").withEntity(
+          PushIgnoreStreamerRequest(
+            token = "device-token-1",
+            streamerId = "streamer-99",
+            streamerLogin = "badstreamer",
+            streamerName = "BadStreamer",
+          ),
+        ),
+      )
+      ignoredResp <- apiApp.run(withSession(Request[IO](Method.GET, uri"/ignored-streamers"), sid))
+      body <- ignoredResp.as[IgnoredStreamersResponse]
+    } yield {
+      assertEquals(ignoreResp.status, Status.Ok)
+      assert(
+        body.streamers.exists(_.streamerId == "streamer-99"),
+        "Expected ignored streamer to be persisted for the token's user",
+      )
+    }
+  }
+
+  test("POST /push/ignore-streamer returns Forbidden for an unknown device token") {
+    for resp <- apiApp.run(
+        Request[IO](Method.POST, uri"/push/ignore-streamer").withEntity(
+          PushIgnoreStreamerRequest(
+            token = "unregistered-token",
+            streamerId = "streamer-1",
+            streamerLogin = "login",
+            streamerName = "Name",
+          ),
+        ),
+      )
+    yield assertEquals(resp.status, Status.Forbidden)
+  }
+
+  test("POST /push/ignore-streamer rejects empty streamerId") {
+    for resp <- apiApp.run(
+        Request[IO](Method.POST, uri"/push/ignore-streamer").withEntity(
+          PushIgnoreStreamerRequest(
+            token = "device-token-2",
+            streamerId = "   ",
+            streamerLogin = "login",
+            streamerName = "Name",
+          ),
+        ),
+      )
+    yield assertEquals(resp.status, Status.BadRequest)
+  }
+
   // ── Top game IDs endpoint ──────────────────────────────────────────
 
   test("GET /top-game-ids returns Forbidden when not logged in") {

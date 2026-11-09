@@ -13,6 +13,7 @@ class DatabaseSpec extends CatsEffectSuite {
     tagFilterRepo: db.TagFilterRepository,
     userRepo: db.UserRepository,
     topGamesRepo: db.TopGamesRepository,
+    pushRepo: db.PushSubscriptionRepository,
   )
 
   private val dbFixture = ResourceSuiteLocalFixture(
@@ -31,6 +32,7 @@ class DatabaseSpec extends CatsEffectSuite {
       new db.TagFilterRepository(xa, SqlDialect.H2),
       new db.UserRepository(xa),
       new db.TopGamesRepository(xa),
+      new db.PushSubscriptionRepository(xa, SqlDialect.H2),
     ),
   )
 
@@ -214,6 +216,40 @@ class DatabaseSpec extends CatsEffectSuite {
       assert(result.contains("fanout6"))
       assertEquals(result.count(_ == "fanout6"), 1)
     }
+  }
+
+  // ── Push subscription tests ────────────────────────────────────────
+
+  test("getUserIdByToken returns the user for a registered device token") {
+    for {
+      _ <- repos.pushRepo.savePushSubscription(
+        userId = "pushuser1",
+        deviceToken = "token-abc",
+        platform = "ios",
+      )
+      userId <- repos.pushRepo.getUserIdByToken("token-abc")
+    } yield assertEquals(userId, Some("pushuser1"))
+  }
+
+  test("getUserIdByToken returns None for an unknown device token") {
+    for userId <- repos.pushRepo.getUserIdByToken("no-such-token")
+    yield assertEquals(userId, None)
+  }
+
+  test("savePushSubscription reassigns a device token to the latest user (no duplicates)") {
+    for {
+      _ <- repos.pushRepo.savePushSubscription(
+        userId = "owner-old",
+        deviceToken = "shared-token",
+        platform = "ios",
+      )
+      _ <- repos.pushRepo.savePushSubscription(
+        userId = "owner-new",
+        deviceToken = "shared-token",
+        platform = "ios",
+      )
+      userId <- repos.pushRepo.getUserIdByToken("shared-token")
+    } yield assertEquals(userId, Some("owner-new"))
   }
 
 }
