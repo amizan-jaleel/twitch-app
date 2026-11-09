@@ -2,6 +2,8 @@ import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
 import scala.sys.process._
 
 val scala3Version = "3.6.3"
+val http4sVersion = "0.23.38"
+val circeVersion = "0.14.16"
 
 ThisBuild / scalaVersion := scala3Version
 ThisBuild / version := "0.1.0-SNAPSHOT"
@@ -11,7 +13,7 @@ ThisBuild / organization := "com.twitch"
 
 // ── npm / Tailwind / Scalawind tasks ───────────────────────────────
 
-val npmInstall = taskKey[Unit]("Run npm install if node_modules is missing")
+val npmInstall = taskKey[Unit]("Run npm ci if node_modules is missing")
 val scalawindGen = taskKey[Seq[File]]("Generate scalawind.scala from tailwind config")
 val tailwindBuild = taskKey[File]("Build Tailwind CSS output")
 
@@ -29,10 +31,10 @@ ThisBuild / npmInstall := {
   val log = streams.value.log
   val nodeModules = baseDirectory.value / "node_modules"
   if (!nodeModules.exists()) {
-    log.info("Running npm install...")
-    val exitCode = Process(buildCommand("npm", Seq("install")), baseDirectory.value)
+    log.info("Running npm ci...")
+    val exitCode = Process(buildCommand("npm", Seq("ci")), baseDirectory.value)
       .!(ProcessLogger(s => log.info(s), s => log.error(s)))
-    if (exitCode != 0) sys.error("npm install failed")
+    if (exitCode != 0) sys.error("npm ci failed")
   }
 }
 
@@ -53,10 +55,10 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
     name := "core",
     scalacOptions ++= Seq("-new-syntax", "-no-indent"),
     libraryDependencies ++= Seq(
-      "org.typelevel" %%% "cats-effect" % "3.5.7",
-      "io.circe" %%% "circe-core" % "0.14.10",
-      "io.circe" %%% "circe-generic" % "0.14.10",
-      "io.circe" %%% "circe-parser" % "0.14.10",
+      "org.typelevel" %%% "cats-effect" % "3.7.1",
+      "io.circe" %%% "circe-core" % circeVersion,
+      "io.circe" %%% "circe-generic" % circeVersion,
+      "io.circe" %%% "circe-parser" % circeVersion,
     ),
   )
 
@@ -71,7 +73,8 @@ lazy val frontend = project
     libraryDependencies ++= Seq(
       "com.armanbilge" %%% "calico" % "0.2.3",
       "org.http4s" %%% "http4s-dom" % "0.2.11",
-      "org.http4s" %%% "http4s-circe" % "0.23.30",
+      "org.http4s" %%% "http4s-client" % http4sVersion,
+      "org.http4s" %%% "http4s-circe" % http4sVersion,
     ),
 
     // Generate scalawind.scala before compilation
@@ -137,15 +140,15 @@ lazy val backend = project
     name := "backend",
     scalacOptions ++= Seq("-new-syntax", "-no-indent"),
     libraryDependencies ++= Seq(
-      "org.http4s" %% "http4s-ember-server" % "0.23.30",
-      "org.http4s" %% "http4s-ember-client" % "0.23.30",
-      "org.http4s" %% "http4s-dsl" % "0.23.30",
-      "org.http4s" %% "http4s-circe" % "0.23.30",
-      "ch.qos.logback" % "logback-classic" % "1.5.16",
+      "org.http4s" %% "http4s-ember-server" % http4sVersion,
+      "org.http4s" %% "http4s-ember-client" % http4sVersion,
+      "org.http4s" %% "http4s-dsl" % http4sVersion,
+      "org.http4s" %% "http4s-circe" % http4sVersion,
+      "ch.qos.logback" % "logback-classic" % "1.6.6",
       "org.tpolecat" %% "doobie-core" % "1.0.0-RC8",
       "org.tpolecat" %% "doobie-postgres" % "1.0.0-RC8",
       "org.tpolecat" %% "doobie-hikari" % "1.0.0-RC8",
-      "org.postgresql" % "postgresql" % "42.7.4",
+      "org.postgresql" % "postgresql" % "42.7.14",
       "org.tpolecat" %% "doobie-h2" % "1.0.0-RC8",
       "com.h2database" % "h2" % "2.3.232",
       "com.typesafe" % "config" % "1.4.3",

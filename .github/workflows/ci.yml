@@ -54,6 +54,7 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+          check-latest: true
 
       - name: Install sbt
         run: |
@@ -69,7 +70,7 @@ jobs:
           cache: 'npm'
 
       - name: Install npm dependencies
-        run: npm install
+        run: npm ci
 
       - name: Cache sbt
         uses: actions/cache@v4
@@ -101,6 +102,7 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+          check-latest: true
 
       - name: Set up sbt
         uses: sbt/setup-sbt@v1
