@@ -5,8 +5,10 @@ import cats.effect.IO
 import com.twitch.backend.db.PushSubscriptionRow
 import com.twitch.core.{
   StreamNotification,
+  TwitchCategory,
   TwitchSearchCategoriesResponse,
   TwitchSearchChannelsResponse,
+  TwitchStream,
   TwitchTokenResponse,
   TwitchUser,
 }
@@ -43,4 +45,9 @@ trait TwitchApi {
   def getUser(accessToken: String): IO[TwitchUser]
   def exchangeCode(code: String, redirectUri: String): IO[TwitchTokenResponse]
   def refreshToken(refreshToken: String): IO[TwitchTokenResponse]
+}
+
+trait TwitchPollingApi {
+  def liveStreams(categoryIds: List[String]): IO[List[TwitchStream]]
+  def topGames(limit: Int): IO[List[TwitchCategory]]
 }

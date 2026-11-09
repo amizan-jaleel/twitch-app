@@ -1,6 +1,8 @@
 package com.twitch.backend
 
 import cats.effect.*
+import cats.effect.implicits.*
+import cats.effect.std.Mutex
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.client.Client
@@ -10,25 +12,33 @@ import org.typelevel.ci.*
 
 import com.twitch.core.{
   PaginatedResponse,
+  TwitchCategory,
   TwitchSearchCategoriesResponse,
   TwitchSearchChannelsResponse,
+  TwitchStream,
+  TwitchStreamsResponse,
   TwitchTokenResponse,
   TwitchUser,
   TwitchUsersResponse,
 }
 
-opaque type AppAccessToken = String
-object AppAccessToken {
+opaque private type AppAccessToken = String
+
+private object AppAccessToken {
   def apply(s: String): AppAccessToken = s
   extension (t: AppAccessToken) def value: String = t
 }
 
-class TwitchApiClient(
-  val client: Client[IO],
+class TwitchApiClient private (
+  client: Client[IO],
   clientId: String,
   clientSecret: String,
-  private val appToken: Ref[IO, Option[AppAccessToken]],
-) extends TwitchApi {
+  streamsPageSize: Int,
+  parallelCategories: Int,
+  appToken: Ref[IO, Option[AppAccessToken]],
+  tokenMutex: Mutex[IO],
+) extends TwitchApi
+  with TwitchPollingApi {
 
   def searchCategories(
     query: String,
@@ -101,12 +111,43 @@ class TwitchApiClient(
     }
   }
 
-  def withTokenRefresh[A](f: AppAccessToken ?=> IO[A]): IO[A] =
-    getOrRefreshToken.flatMap(t => f(using t)).handleErrorWith { _ =>
-      appToken.set(None) *> getOrRefreshToken.flatMap(t => f(using t))
+  def liveStreams(categoryIds: List[String]): IO[List[TwitchStream]] =
+    withTokenRefresh {
+      categoryIds
+        .parTraverseN(parallelCategories) { categoryId =>
+          val baseUri = uri"https://api.twitch.tv/helix/streams"
+            .withQueryParam("game_id", categoryId)
+            .withQueryParam("first", streamsPageSize.toString)
+          fetchPaginated[TwitchStream] { cursor =>
+            client.expect[TwitchStreamsResponse](buildAuthedRequest(baseUri, cursor))
+          }
+        }
+        .map(_.flatten)
     }
 
-  def buildAuthedRequest(
+  def topGames(limit: Int): IO[List[TwitchCategory]] =
+    withTokenRefresh {
+      val baseUri = uri"https://api.twitch.tv/helix/games/top"
+        .withQueryParam("first", "100")
+      fetchPaginated[TwitchCategory](
+        cursor =>
+          client.expect[TwitchSearchCategoriesResponse](buildAuthedRequest(baseUri, cursor)),
+        limit = limit,
+      )
+    }
+
+  private def withTokenRefresh[A](f: AppAccessToken ?=> IO[A]): IO[A] =
+    getOrRefreshToken.attempt.flatMap {
+      case Right(token) =>
+        IO.defer(f(using token)).handleErrorWith { _ =>
+          // A different poller may already have replaced the token that failed.
+          appToken.update(_.filterNot(_ == token)) *>
+            getOrRefreshToken.flatMap(t => f(using t))
+        }
+      case Left(_) => getOrRefreshToken.flatMap(t => f(using t))
+    }
+
+  private def buildAuthedRequest(
     baseUri: Uri,
     cursor: Option[String],
   )(using token: AppAccessToken): Request[IO] = {
@@ -117,7 +158,7 @@ class TwitchApiClient(
     )
   }
 
-  def fetchPaginated[A](
+  private def fetchPaginated[A](
     fetchPage: Option[String] => IO[PaginatedResponse[A]],
     limit: Int = Int.MaxValue,
   ): IO[List[A]] = {
@@ -154,9 +195,11 @@ class TwitchApiClient(
   }
 
   private def getOrRefreshToken: IO[AppAccessToken] =
-    appToken.get.flatMap {
-      case Some(t) => IO.pure(t)
-      case None => fetchAppToken.flatTap(t => appToken.set(Some(t)))
+    tokenMutex.lock.surround {
+      appToken.get.flatMap {
+        case Some(t) => IO.pure(t)
+        case None => fetchAppToken.flatTap(t => appToken.set(Some(t)))
+      }
     }
 
   private def authedRequest(uri: Uri, accessToken: String): Request[IO] =
@@ -173,14 +216,20 @@ object TwitchApiClient {
     client: Client[IO],
     clientId: String,
     clientSecret: String,
+    streamsPageSize: Int,
+    parallelCategories: Int,
   ): IO[TwitchApiClient] =
-    IO.ref(Option.empty[AppAccessToken]).map { tokenRef =>
-      new TwitchApiClient(
-        client = client,
-        clientId = clientId,
-        clientSecret = clientSecret,
-        appToken = tokenRef,
-      )
-    }
+    for {
+      tokenRef <- IO.ref(Option.empty[AppAccessToken])
+      tokenMutex <- Mutex[IO]
+    } yield new TwitchApiClient(
+      client = client,
+      clientId = clientId,
+      clientSecret = clientSecret,
+      streamsPageSize = streamsPageSize,
+      parallelCategories = parallelCategories,
+      appToken = tokenRef,
+      tokenMutex = tokenMutex,
+    )
 
 }
