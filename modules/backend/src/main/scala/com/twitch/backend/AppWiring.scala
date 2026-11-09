@@ -7,7 +7,7 @@ import org.http4s.*
 import org.http4s.client.Client
 import org.http4s.dsl.io.*
 import org.http4s.server.Router
-import org.http4s.server.middleware.CORS
+import org.http4s.server.middleware.{CORS, EntityLimiter}
 import org.http4s.server.staticcontent.*
 
 import com.twitch.core.StreamNotification
@@ -19,6 +19,13 @@ case class App(
 )
 
 object AppWiring {
+
+  // Every JSON request body is a few hundred bytes. Capping them bounds the
+  // memory any single request can make the parser allocate (413 when exceeded).
+  val MaxRequestBodyBytes: Long = 64L * 1024L
+
+  def limitRequestBodies(app: HttpApp[IO]): HttpApp[IO] =
+    EntityLimiter.httpApp(app, limit = MaxRequestBodyBytes)
 
   def build(
     config: ServerConfig,
@@ -128,7 +135,7 @@ object AppWiring {
         },
         "/" -> frontendService,
       ).orNotFound
-      corsApp = CORS.policy.withAllowOriginAll(httpApp)
+      corsApp = CORS.policy.withAllowOriginAll(limitRequestBodies(httpApp))
       poller <- StreamPoller.make(
         client = client,
         clientId = config.clientId,
