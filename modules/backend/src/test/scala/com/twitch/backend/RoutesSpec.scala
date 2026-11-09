@@ -12,7 +12,6 @@ import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.circe.CirceEntityEncoder.*
 import org.http4s.headers.Location
 import org.http4s.implicits.*
-import org.http4s.server.middleware.EntityLimiter
 
 import com.twitch.core.*
 
@@ -276,21 +275,19 @@ class RoutesSpec extends CatsEffectSuite {
     }
   }
 
-  test("Body limit rejects oversized JSON but passes ordinary requests") {
+  test("Body limit rejects oversized JSON with 413 but passes ordinary requests") {
     val limitedApp = AppWiring.limitRequestBodies(apiApp)
     val oversized = "{\"category\":\"" + ("x" * AppWiring.MaxRequestBodyBytes.toInt) + "\"}"
     for {
       sid <- createSession
-      tooLarge <- limitedApp
-        .run(
-          withSession(
-            Request[IO](Method.POST, uri"/follow")
-              .withEntity(oversized)
-              .withContentType(headers.`Content-Type`(MediaType.application.json)),
-            sid,
-          ),
-        )
-        .attempt
+      tooLarge <- limitedApp.run(
+        withSession(
+          Request[IO](Method.POST, uri"/follow")
+            .withEntity(oversized)
+            .withContentType(headers.`Content-Type`(MediaType.application.json)),
+          sid,
+        ),
+      )
       ok <- limitedApp.run(
         withSession(
           Request[IO](Method.POST, uri"/follow").withEntity(FollowRequest(testCategory)),
@@ -298,11 +295,7 @@ class RoutesSpec extends CatsEffectSuite {
         ),
       )
     } yield {
-      tooLarge match {
-        case Left(e: EntityLimiter.EntityTooLarge) =>
-          assertEquals(e.toHttpResponse[IO](HttpVersion.`HTTP/1.1`).status, Status.PayloadTooLarge)
-        case other => fail(s"Expected EntityTooLarge, got $other")
-      }
+      assertEquals(tooLarge.status, Status.PayloadTooLarge)
       assertEquals(ok.status, Status.Ok)
     }
   }
