@@ -21,11 +21,20 @@ case class App(
 object AppWiring {
 
   // Every JSON request body is a few hundred bytes. Capping them bounds the
-  // memory any single request can make the parser allocate (413 when exceeded).
+  // memory any single request can make the parser allocate.
   val MaxRequestBodyBytes: Long = 64L * 1024L
 
-  def limitRequestBodies(app: HttpApp[IO]): HttpApp[IO] =
-    EntityLimiter.httpApp(app, limit = MaxRequestBodyBytes)
+  // EntityLimiter raises EntityTooLarge while the route reads the body; left
+  // alone, Ember's default error handler turns it into a 500. Render the 413.
+  def limitRequestBodies(app: HttpApp[IO]): HttpApp[IO] = {
+    val limited = EntityLimiter.httpApp(app, limit = MaxRequestBodyBytes)
+    HttpApp[IO] { req =>
+      limited.run(req).recover {
+        case tooLarge: EntityLimiter.EntityTooLarge =>
+          tooLarge.toHttpResponse[IO](req.httpVersion)
+      }
+    }
+  }
 
   def build(
     config: ServerConfig,
