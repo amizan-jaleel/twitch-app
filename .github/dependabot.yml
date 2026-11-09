@@ -1,0 +1,31 @@
+# Version-update PRs only for what ships with the server (Render) and CI.
+# Mobile dependencies (Swift packages, @capacitor/*) are deliberately left
+# out until the apps are on their storefronts: bumping them only matters once
+# there is a release to ship. Dependabot alerts still cover them.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: "@capacitor/*"
+    groups:
+      build-tools:
+        patterns: ["*"]
