@@ -1,6 +1,7 @@
 package com.twitch.backend
 
 import cats.effect.*
+import cats.effect.std.Mutex
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.client.Client
@@ -18,6 +19,7 @@ import com.twitch.core.{
 }
 
 opaque type AppAccessToken = String
+
 object AppAccessToken {
   def apply(s: String): AppAccessToken = s
   extension (t: AppAccessToken) def value: String = t
@@ -28,6 +30,7 @@ class TwitchApiClient(
   clientId: String,
   clientSecret: String,
   private val appToken: Ref[IO, Option[AppAccessToken]],
+  tokenMutex: Mutex[IO],
 ) extends TwitchApi {
 
   def searchCategories(
@@ -101,9 +104,17 @@ class TwitchApiClient(
     }
   }
 
+  // Both pollers share this client's token cache, so a failure must only
+  // invalidate the token it was made with: another poller may already have
+  // replaced it.
   def withTokenRefresh[A](f: AppAccessToken ?=> IO[A]): IO[A] =
-    getOrRefreshToken.flatMap(t => f(using t)).handleErrorWith { _ =>
-      appToken.set(None) *> getOrRefreshToken.flatMap(t => f(using t))
+    getOrRefreshToken.attempt.flatMap {
+      case Right(token) =>
+        IO.defer(f(using token)).handleErrorWith { _ =>
+          appToken.update(_.filterNot(_ == token)) *>
+            getOrRefreshToken.flatMap(t => f(using t))
+        }
+      case Left(_) => getOrRefreshToken.flatMap(t => f(using t))
     }
 
   def buildAuthedRequest(
@@ -153,10 +164,13 @@ class TwitchApiClient(
     }
   }
 
+  // Serialized so concurrent cache misses share one token request.
   private def getOrRefreshToken: IO[AppAccessToken] =
-    appToken.get.flatMap {
-      case Some(t) => IO.pure(t)
-      case None => fetchAppToken.flatTap(t => appToken.set(Some(t)))
+    tokenMutex.lock.surround {
+      appToken.get.flatMap {
+        case Some(t) => IO.pure(t)
+        case None => fetchAppToken.flatTap(t => appToken.set(Some(t)))
+      }
     }
 
   private def authedRequest(uri: Uri, accessToken: String): Request[IO] =
@@ -174,13 +188,15 @@ object TwitchApiClient {
     clientId: String,
     clientSecret: String,
   ): IO[TwitchApiClient] =
-    IO.ref(Option.empty[AppAccessToken]).map { tokenRef =>
-      new TwitchApiClient(
-        client = client,
-        clientId = clientId,
-        clientSecret = clientSecret,
-        appToken = tokenRef,
-      )
-    }
+    for {
+      tokenRef <- IO.ref(Option.empty[AppAccessToken])
+      tokenMutex <- Mutex[IO]
+    } yield new TwitchApiClient(
+      client = client,
+      clientId = clientId,
+      clientSecret = clientSecret,
+      appToken = tokenRef,
+      tokenMutex = tokenMutex,
+    )
 
 }
