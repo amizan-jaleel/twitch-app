@@ -92,6 +92,8 @@ object AppWiring {
         client = client,
         clientId = config.clientId,
         clientSecret = config.clientSecret,
+        streamsPageSize = settings.streamsPageSize,
+        parallelCategories = settings.parallelCategories,
       )
       sessionManager = new auth.SessionManager(sessionRepo, twitchApi, settings.tokenRefreshSkew)
       authRoutes = new routes.AuthRoutes(
@@ -139,7 +141,7 @@ object AppWiring {
         settings = settings,
         tagFilterRepo = tagFilterRepo,
       )
-      topGamesPoller <- TopGamesPoller.make(
+      topGamesPoller = new TopGamesPoller(
         twitchClient = twitchApi,
         settings = settings,
         topGamesRepo = topGamesRepo,
