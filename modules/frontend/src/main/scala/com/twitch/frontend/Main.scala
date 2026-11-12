@@ -43,6 +43,8 @@ object Main extends IOWebApp:
       _ <- initPushNotifications(state).background
       _ <- syncIgnoredFromBackground(state).toResource
       app <- appView(state)
+      // index.html shows a static loader until the JS and initial fetches finish
+      _ <- IO(Option(dom.document.getElementById("boot-loader")).foreach(_.remove())).toResource
     yield app
 
   private def requestNotificationPermission: IO[Unit] =

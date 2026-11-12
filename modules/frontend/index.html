@@ -13,8 +13,38 @@
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
     <link rel="apple-touch-icon" href="/icons/icon.svg">
     <link href="dist/output.css?v=2" rel="stylesheet">
+    <!-- Boot loader styles are inline so they paint before output.css and main.js arrive -->
+    <style>
+      html, body { margin: 0; background: #0e0e10; color: #adadb8; }
+      #boot-loader {
+        position: fixed; inset: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+        color: #adadb8; font-family: system-ui, -apple-system, sans-serif; font-size: 14px;
+        opacity: 0;
+        /* Delayed so fast loads replace the loader before it is ever visible */
+        animation: boot-fade-in 200ms ease-out 400ms forwards;
+      }
+      #boot-loader img { width: 56px; height: 56px; }
+      #boot-loader .boot-spinner {
+        width: 28px; height: 28px; border-radius: 50%;
+        border: 3px solid rgba(145, 70, 255, 0.25); border-top-color: #9146ff;
+        animation: boot-spin 800ms linear infinite;
+      }
+      @keyframes boot-fade-in { to { opacity: 1; } }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-loader .boot-spinner { animation: none; }
+      }
+    </style>
 </head>
 <body>
+    <!-- Removed by Main.render once the app is ready to mount -->
+    <div id="boot-loader" role="status" aria-live="polite">
+        <img src="/icons/icon.svg" alt="">
+        <div class="boot-spinner"></div>
+        <span>Loading…</span>
+    </div>
+    <noscript>Twitch Category Tracker needs JavaScript to run.</noscript>
     <div id="app"></div>
     <!-- This path assumes fastLinkJS output in development -->
     <script src="target/scala-3.6.3/frontend-fastopt/main.js"></script>
