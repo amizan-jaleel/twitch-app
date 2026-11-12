@@ -8,7 +8,6 @@ import cats.effect.std.Queue
 import cats.syntax.all.*
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
-import org.http4s.client.Client
 import org.http4s.implicits.*
 
 import com.twitch.backend.db.{
@@ -20,10 +19,7 @@ import com.twitch.backend.db.{
 import com.twitch.core.{StreamNotification, TwitchStream, TwitchStreamsResponse}
 
 class StreamPoller(
-  appToken: Ref[IO, Option[AppAccessToken]],
-  client: Client[IO],
-  clientId: String,
-  clientSecret: String,
+  twitchClient: TwitchApiClient,
   followRepo: FollowRepository,
   ignoredStreamerRepo: IgnoredStreamerRepository,
   notificationQueues: Ref[IO, Map[String, (String, Queue[IO, StreamNotification])]],
@@ -32,7 +28,7 @@ class StreamPoller(
   pushService: Option[PushService],
   settings: AppSettings,
   tagFilterRepo: TagFilterRepository,
-) extends TwitchPoller(clientId, clientSecret, client, appToken) {
+) {
 
   private def fetchStreamsPage(
     categoryId: String,
@@ -41,7 +37,9 @@ class StreamPoller(
     val baseUri = uri"https://api.twitch.tv/helix/streams"
       .withQueryParam("game_id", categoryId)
       .withQueryParam("first", settings.streamsPageSize.toString)
-    client.expect[TwitchStreamsResponse](buildAuthedRequest(baseUri, cursor))
+    twitchClient.client.expect[TwitchStreamsResponse](
+      twitchClient.buildAuthedRequest(baseUri, cursor),
+    )
   }
 
   private def fetchLiveStreams(categoryIds: List[String])(using
@@ -49,7 +47,7 @@ class StreamPoller(
   ): IO[List[TwitchStream]] =
     categoryIds
       .parTraverseN(settings.parallelCategories) { categoryId =>
-        fetchPaginated[TwitchStream](fetchStreamsPage(categoryId, _))
+        twitchClient.fetchPaginated[TwitchStream](fetchStreamsPage(categoryId, _))
       }
       .map(_.flatten)
 
@@ -135,7 +133,7 @@ class StreamPoller(
       allCategories <- followRepo.getAllFollowedCategories
       _ <- IO.whenA(allCategories.nonEmpty) {
         for {
-          streams <- withTokenRefresh(fetchLiveStreams(allCategories.map(_.id)))
+          streams <- twitchClient.withTokenRefresh(fetchLiveStreams(allCategories.map(_.id)))
           liveIds = streams.collect { case s if s.`type` == "live" => s.id }.toSet
           _ <- notifiedStreamIds.set(liveIds)
           _ <- IO.println(
@@ -150,7 +148,7 @@ class StreamPoller(
       allCategories <- followRepo.getAllFollowedCategories
       _ <- IO.whenA(allCategories.nonEmpty) {
         for {
-          streams <- withTokenRefresh(fetchLiveStreams(allCategories.map(_.id)))
+          streams <- twitchClient.withTokenRefresh(fetchLiveStreams(allCategories.map(_.id)))
           now <- IO(Instant.now())
           alreadyNotified <- notifiedStreamIds.get
           (newStreams, updatedNotified) = StreamLogic.findNewStreams(
@@ -182,9 +180,7 @@ class StreamPoller(
 object StreamPoller {
 
   def make(
-    client: Client[IO],
-    clientId: String,
-    clientSecret: String,
+    twitchClient: TwitchApiClient,
     followRepo: FollowRepository,
     ignoredStreamerRepo: IgnoredStreamerRepository,
     notificationQueues: Ref[IO, Map[String, (String, Queue[IO, StreamNotification])]],
@@ -193,22 +189,18 @@ object StreamPoller {
     settings: AppSettings,
     tagFilterRepo: TagFilterRepository,
   ): IO[StreamPoller] =
-    for {
-      tokenRef <- IO.ref(Option.empty[AppAccessToken])
-      notifiedRef <- IO.ref(Set.empty[String])
-    } yield new StreamPoller(
-      appToken = tokenRef,
-      client = client,
-      clientId = clientId,
-      clientSecret = clientSecret,
-      followRepo = followRepo,
-      ignoredStreamerRepo = ignoredStreamerRepo,
-      notificationQueues = notificationQueues,
-      notifiedStreamIds = notifiedRef,
-      pushRepo = pushRepo,
-      pushService = pushService,
-      settings = settings,
-      tagFilterRepo = tagFilterRepo,
-    )
+    IO.ref(Set.empty[String]).map { notifiedRef =>
+      new StreamPoller(
+        twitchClient = twitchClient,
+        followRepo = followRepo,
+        ignoredStreamerRepo = ignoredStreamerRepo,
+        notificationQueues = notificationQueues,
+        notifiedStreamIds = notifiedRef,
+        pushRepo = pushRepo,
+        pushService = pushService,
+        settings = settings,
+        tagFilterRepo = tagFilterRepo,
+      )
+    }
 
 }

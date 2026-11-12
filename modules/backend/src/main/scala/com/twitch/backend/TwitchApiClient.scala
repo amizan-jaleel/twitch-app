@@ -1,6 +1,7 @@
 package com.twitch.backend
 
-import cats.effect.IO
+import cats.effect.*
+import cats.effect.std.Mutex
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.client.Client
@@ -9,6 +10,7 @@ import org.http4s.implicits.*
 import org.typelevel.ci.*
 
 import com.twitch.core.{
+  PaginatedResponse,
   TwitchSearchCategoriesResponse,
   TwitchSearchChannelsResponse,
   TwitchTokenResponse,
@@ -16,10 +18,19 @@ import com.twitch.core.{
   TwitchUsersResponse,
 }
 
+opaque type AppAccessToken = String
+
+object AppAccessToken {
+  def apply(s: String): AppAccessToken = s
+  extension (t: AppAccessToken) def value: String = t
+}
+
 class TwitchApiClient(
-  client: Client[IO],
+  val client: Client[IO],
   clientId: String,
   clientSecret: String,
+  private val appToken: Ref[IO, Option[AppAccessToken]],
+  tokenMutex: Mutex[IO],
 ) extends TwitchApi {
 
   def searchCategories(
@@ -93,10 +104,99 @@ class TwitchApiClient(
     }
   }
 
+  // Both pollers share this client's token cache, so a failure must only
+  // invalidate the token it was made with: another poller may already have
+  // replaced it.
+  def withTokenRefresh[A](f: AppAccessToken ?=> IO[A]): IO[A] =
+    getOrRefreshToken.attempt.flatMap {
+      case Right(token) =>
+        IO.defer(f(using token)).handleErrorWith { _ =>
+          appToken.update(_.filterNot(_ == token)) *>
+            getOrRefreshToken.flatMap(t => f(using t))
+        }
+      case Left(_) => getOrRefreshToken.flatMap(t => f(using t))
+    }
+
+  def buildAuthedRequest(
+    baseUri: Uri,
+    cursor: Option[String],
+  )(using token: AppAccessToken): Request[IO] = {
+    val uriWithCursor = cursor.fold(baseUri)(c => baseUri.withQueryParam("after", c))
+    Request[IO](method = Method.GET, uri = uriWithCursor).putHeaders(
+      Authorization(Credentials.Token(AuthScheme.Bearer, token.value)),
+      Header.Raw(ci"Client-Id", clientId),
+    )
+  }
+
+  def fetchPaginated[A](
+    fetchPage: Option[String] => IO[PaginatedResponse[A]],
+    limit: Int = Int.MaxValue,
+  ): IO[List[A]] = {
+    def go(cursor: Option[String], acc: List[A]): IO[List[A]] =
+      fetchPage(cursor).flatMap { resp =>
+        val newAcc = acc ::: resp.pageData
+        if newAcc.size >= limit then IO.pure(newAcc.take(limit))
+        else
+          resp.pageCursor match {
+            case Some(next) if resp.pageData.nonEmpty => go(Some(next), newAcc)
+            case _ => IO.pure(newAcc.take(limit))
+          }
+      }
+    go(None, Nil)
+  }
+
+  private def fetchAppToken: IO[AppAccessToken] = {
+    val req =
+      Request[IO](method = Method.POST, uri = uri"https://id.twitch.tv/oauth2/token").withEntity(
+        UrlForm(
+          "client_id" -> clientId,
+          "client_secret" -> clientSecret,
+          "grant_type" -> "client_credentials",
+        ),
+      )
+    client.run(req).use { resp =>
+      if resp.status.isSuccess then
+        resp.as[TwitchTokenResponse].map(r => AppAccessToken(r.access_token))
+      else
+        resp.bodyText.compile.string.flatMap { body =>
+          IO.raiseError(new RuntimeException(s"Failed to get app token: ${resp.status} $body"))
+        }
+    }
+  }
+
+  // Serialized so concurrent cache misses share one token request.
+  private def getOrRefreshToken: IO[AppAccessToken] =
+    tokenMutex.lock.surround {
+      appToken.get.flatMap {
+        case Some(t) => IO.pure(t)
+        case None => fetchAppToken.flatTap(t => appToken.set(Some(t)))
+      }
+    }
+
   private def authedRequest(uri: Uri, accessToken: String): Request[IO] =
     Request[IO](method = Method.GET, uri = uri).putHeaders(
       Authorization(Credentials.Token(AuthScheme.Bearer, accessToken)),
       Header.Raw(ci"Client-Id", clientId),
+    )
+
+}
+
+object TwitchApiClient {
+
+  def make(
+    client: Client[IO],
+    clientId: String,
+    clientSecret: String,
+  ): IO[TwitchApiClient] =
+    for {
+      tokenRef <- IO.ref(Option.empty[AppAccessToken])
+      tokenMutex <- Mutex[IO]
+    } yield new TwitchApiClient(
+      client = client,
+      clientId = clientId,
+      clientSecret = clientSecret,
+      appToken = tokenRef,
+      tokenMutex = tokenMutex,
     )
 
 }
