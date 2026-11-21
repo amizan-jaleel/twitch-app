@@ -7,6 +7,7 @@ on:
       - '**.scala'
       - '**.sbt'
       - 'project/**'
+      - 'scripts/CheckJavaSecurity*.java'
       - 'package.json'
       - 'package-lock.json'
       - 'capacitor.config.*'
@@ -27,6 +28,7 @@ on:
       - '**.scala'
       - '**.sbt'
       - 'project/**'
+      - 'scripts/CheckJavaSecurity*.java'
       - 'package.json'
       - 'package-lock.json'
       - 'capacitor.config.*'
@@ -52,10 +54,16 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          # Adoptium's SemVer for JDK 21.0.13.1+2 (Java4Shell fix).
-          java-version: '21.0.13+100000002.0.LTS'
+          java-version: '21'
           distribution: 'temurin'
           check-latest: true
+
+      - name: Verify Java security baseline
+        run: |
+          classes="$RUNNER_TEMP/java-security-check"
+          "$JAVA_HOME/bin/javac" -d "$classes" scripts/CheckJavaSecurity*.java
+          "$JAVA_HOME/bin/java" -cp "$classes" CheckJavaSecurityTest
+          "$JAVA_HOME/bin/java" -cp "$classes" CheckJavaSecurity
 
       - name: Set up sbt
         uses: sbt/setup-sbt@v1
@@ -97,9 +105,12 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21.0.13+100000002.0.LTS'
+          java-version: '21'
           distribution: 'temurin'
           check-latest: true
+
+      - name: Verify Java security baseline
+        run: '"$JAVA_HOME/bin/java" scripts/CheckJavaSecurity.java'
 
       - name: Set up sbt
         uses: sbt/setup-sbt@v1

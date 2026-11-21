@@ -28,11 +28,13 @@ and the [OpenJDK November 17 advisory](https://openjdk.org/groups/vulnerability/
   conditional Kerberos/JMX/JFR/vector/compiler issues; no claim is made that
   every affected feature is used by this app. See the [Oracle risk matrix](https://www.oracle.com/security-alerts/cspunov2026.html#AppendixJAVA).
 
-CI and dependency-graph submission also request the fixed Temurin build. Its
-Adoptium API/SemVer spelling is `21.0.13+100000002.0.LTS`; the usual four-part
-`21.0.13.1+2` is not valid input for the current setup-java action. The container
-smoke job verifies the actual shipped JVM version. Refresh CI version pins and
-this runtime assertion together with future Java image updates.
+CI and dependency-graph submission request the latest Temurin 21 and check the
+installed JVM against the security minimum before sbt starts. The check uses
+Java's version API, not SemVer, which does not preserve this four-part/build
+minimum in range expressions. It rejects old builds and early-access releases,
+but accepts future stable Java 21 security releases. The container smoke job
+also verifies the actual shipped JVM version. Refresh its runtime assertion
+together with future pinned Java image updates.
 
 The newly published Noble image indexes currently contain AMD64, PPC64LE and
 S390X, not ARM64. Local container verification therefore targets `linux/amd64`.
