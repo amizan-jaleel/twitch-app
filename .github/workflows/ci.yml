@@ -52,7 +52,8 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          # Adoptium's SemVer for JDK 21.0.13.1+2 (Java4Shell fix).
+          java-version: '21.0.13+100000002.0.LTS'
           distribution: 'temurin'
           check-latest: true
 
@@ -96,7 +97,7 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '21.0.13+100000002.0.LTS'
           distribution: 'temurin'
           check-latest: true
 
@@ -203,6 +204,13 @@ jobs:
           tags: twitch-app:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify patched Java runtime
+        run: |
+          set -euo pipefail
+          version="$(docker run --rm twitch-app:test java -version 2>&1)"
+          printf '%s\n' "$version"
+          grep -F 'Temurin-21.0.13.1+2' <<< "$version"
 
       - name: Start app container
         run: |

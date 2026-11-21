@@ -22,8 +22,10 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          # Adoptium's SemVer for JDK 21.0.13.1+2 (Java4Shell fix).
+          java-version: '21.0.13+100000002.0.LTS'
           distribution: 'temurin'
+          check-latest: true
 
       - uses: sbt/setup-sbt@v1
 

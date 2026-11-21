@@ -8,6 +8,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Keep Java on the supported 21 LTS line; major upgrades need review.
+    ignore:
+      - dependency-name: eclipse-temurin
+        update-types: ["version-update:semver-major"]
     groups:
       base-images:
         patterns: ["*"]
