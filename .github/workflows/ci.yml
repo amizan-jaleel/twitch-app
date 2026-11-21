@@ -7,6 +7,7 @@ on:
       - '**.scala'
       - '**.sbt'
       - 'project/**'
+      - 'scripts/CheckJavaSecurity*.java'
       - 'package.json'
       - 'package-lock.json'
       - 'capacitor.config.*'
@@ -27,6 +28,7 @@ on:
       - '**.scala'
       - '**.sbt'
       - 'project/**'
+      - 'scripts/CheckJavaSecurity*.java'
       - 'package.json'
       - 'package-lock.json'
       - 'capacitor.config.*'
@@ -55,6 +57,13 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           check-latest: true
+
+      - name: Verify Java security baseline
+        run: |
+          classes="$RUNNER_TEMP/java-security-check"
+          "$JAVA_HOME/bin/javac" -d "$classes" scripts/CheckJavaSecurity*.java
+          "$JAVA_HOME/bin/java" -cp "$classes" CheckJavaSecurityTest
+          "$JAVA_HOME/bin/java" -cp "$classes" CheckJavaSecurity
 
       - name: Set up sbt
         uses: sbt/setup-sbt@v1
@@ -99,6 +108,9 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           check-latest: true
+
+      - name: Verify Java security baseline
+        run: '"$JAVA_HOME/bin/java" scripts/CheckJavaSecurity.java'
 
       - name: Set up sbt
         uses: sbt/setup-sbt@v1
@@ -203,6 +215,13 @@ jobs:
           tags: twitch-app:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify patched Java runtime
+        run: |
+          set -euo pipefail
+          version="$(docker run --rm twitch-app:test java -version 2>&1)"
+          printf '%s\n' "$version"
+          grep -F 'Temurin-21.0.13.1+2' <<< "$version"
 
       - name: Start app container
         run: |

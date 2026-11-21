@@ -22,11 +22,15 @@ Install all of the following before building (works on macOS, Linux, or Windows)
 
 | Tool | Version | Install |
 |------|---------|---------|
-| JDK | 17+ | [Adoptium](https://adoptium.net/) or `brew install openjdk@17` |
+| JDK | 21.0.13.1+2 or a newer patched Java 21 release | [Adoptium](https://adoptium.net/) |
 | sbt | latest | [sbt download](https://www.scala-sbt.org/download) or `brew install sbt` |
 | Node.js | 20+ | [nodejs.org](https://nodejs.org/) or `brew install node` |
 
 Node.js includes `npm` and `npx` automatically — no separate install needed. They're used by the build for Tailwind CSS and Scalawind generation. `npm install` runs automatically on first build.
+
+Update the JDK actually used by sbt and Android Studio/Gradle as well as the
+Docker image. See the [November JVM security update](SECURITY_JVM_2026_11.md)
+for the runtime requirements and temporary Java4Shell mitigation.
 
 ### Running Locally
 

@@ -1,7 +1,8 @@
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS node
 
 # ── Build stage ─────────────────────────────────────────────────────
-FROM eclipse-temurin:21.0.13_9-jdk-noble@sha256:114cabb73033ca4ce7ceec3deb62396bc1b716282bae051ed3c1d82e38fcab2d AS build
+# November 2026 CSPU: includes the CVE-2026-114938 (Java4Shell) fix.
+FROM eclipse-temurin:21.0.13.1_2-jdk-noble@sha256:4dea56dcfa1a89832caf1ffe082c49b3878388df3ce97b7f0a49f9c4372b718c AS build
 
 # Install Node.js and sbt
 COPY --from=node /usr/local /usr/local
@@ -37,7 +38,7 @@ RUN mkdir -p /app/static/icons && \
     sed -e 's|target/scala-3.6.3/frontend-fastopt/main.js|main.js|' -e 's|dist/output.css|output.css|' modules/frontend/index.html > /app/static/index.html
 
 # ── Run stage ──────────────────────────────────────────────────────
-FROM eclipse-temurin:21.0.13_9-jre-noble@sha256:0eda5830ed7b669abc246a8dc520ea8a23cab06f9a8d4b6964109e2f2394e46f
+FROM eclipse-temurin:21.0.13.1_2-jre-noble@sha256:48c8fa59c875b31be10ca14343c1992cabdaf15164a5ace3d823fe4341a14573
 
 WORKDIR /app
 

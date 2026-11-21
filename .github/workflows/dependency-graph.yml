@@ -8,6 +8,7 @@ on:
     paths:
       - '**.sbt'
       - 'project/**'
+      - 'scripts/CheckJavaSecurity*.java'
   workflow_dispatch:
 
 permissions:
@@ -24,6 +25,10 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+          check-latest: true
+
+      - name: Verify Java security baseline
+        run: '"$JAVA_HOME/bin/java" scripts/CheckJavaSecurity.java'
 
       - uses: sbt/setup-sbt@v1
 

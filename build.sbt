@@ -2,7 +2,7 @@ import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
 import scala.sys.process._
 
 val scala3Version = "3.6.3"
-val http4sVersion = "0.23.38"
+val http4sVersion = "0.23.39"
 val circeVersion = "0.14.16"
 
 ThisBuild / scalaVersion := scala3Version
